@@ -1,0 +1,4046 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "GeminiGen Backend Public API",
+    "description": "Public API documentation.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/uapi/v1/histories": {
+      "get": {
+        "tags": [
+          "user-api-history"
+        ],
+        "summary": "Get All Generate History",
+        "operationId": "get_all_generate_history_uapi_v1_histories_get",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          },
+          {
+            "name": "filter_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "all",
+              "title": "Filter By"
+            }
+          },
+          {
+            "name": "items_per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": 10,
+              "title": "Items Per Page"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": 1,
+              "title": "Page"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversionHistoriesUApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "user-api-history"
+        ],
+        "summary": "Delete Multiple Gemini Histories",
+        "operationId": "delete_multiple_gemini_histories_uapi_v1_histories_delete",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ids"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "media_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Media Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateHistoryDeleteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/uapi/v1/history/{conversion_uuid}": {
+      "get": {
+        "tags": [
+          "user-api-history"
+        ],
+        "summary": "Get Generate History",
+        "operationId": "get_generate_history_uapi_v1_history__conversion_uuid__get",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          },
+          {
+            "name": "conversion_uuid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conversion Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SingleGenerateHistoryUApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/uapi/v1/histories/all": {
+      "delete": {
+        "tags": [
+          "user-api-history"
+        ],
+        "summary": "Delete All Gemini Histories",
+        "operationId": "delete_all_gemini_histories_uapi_v1_histories_all_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateHistoryDeleteResult"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          }
+        ]
+      }
+    },
+    "/uapi/v1/histories/all/{history_type}": {
+      "delete": {
+        "tags": [
+          "user-api-history"
+        ],
+        "summary": "Delete Gemini Histories By Type",
+        "operationId": "delete_gemini_histories_by_type_uapi_v1_histories_all__history_type__delete",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          },
+          {
+            "name": "history_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "History Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateHistoryDeleteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/uapi/v1/history/{conversion_id}": {
+      "delete": {
+        "tags": [
+          "user-api-history"
+        ],
+        "summary": "Delete One History",
+        "operationId": "delete_one_history_uapi_v1_history__conversion_id__delete",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          },
+          {
+            "name": "conversion_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Conversion Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateHistoryDeleteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/uapi/v1/generate_image": {
+      "post": {
+        "tags": [
+          "user-api-image"
+        ],
+        "summary": "Generate Image",
+        "operationId": "generate_image_uapi_v1_generate_image_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_generate_image_uapi_v1_generate_image_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateHistoryGenApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          }
+        ]
+      }
+    },
+    "/uapi/v1/meta_ai/generate": {
+      "post": {
+        "tags": [
+          "user-api-image",
+          "meta_ai"
+        ],
+        "summary": "Uapi Generate Meta Ai Image",
+        "operationId": "uapi_generate_meta_ai_image_uapi_v1_meta_ai_generate_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_uapi_generate_meta_ai_image_uapi_v1_meta_ai_generate_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateHistoryGenApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          }
+        ]
+      }
+    },
+    "/uapi/v1/video-gen/veo/voice": {
+      "get": {
+        "tags": [
+          "user-api-video"
+        ],
+        "summary": "Get Veo Voice",
+        "description": "Preset voices from Google Labs Flow (`externalReferenceMedia`), cached in Redis.",
+        "operationId": "get_veo_voice_uapi_v1_video_gen_veo_voice_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          }
+        ]
+      }
+    },
+    "/uapi/v1/video-gen/veo": {
+      "post": {
+        "tags": [
+          "user-api-video"
+        ],
+        "summary": "User Api Generate Video Veo",
+        "description": "User-API entry point for Veo video generation via VideoService worker.",
+        "operationId": "user_api_generate_video_veo_uapi_v1_video_gen_veo_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_user_api_generate_video_veo_uapi_v1_video_gen_veo_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UapiGenerateHistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          }
+        ]
+      }
+    },
+    "/uapi/v1/video-extend/veo": {
+      "post": {
+        "tags": [
+          "user-api-video"
+        ],
+        "summary": "User Api Extend Video Veo",
+        "operationId": "user_api_extend_video_veo_uapi_v1_video_extend_veo_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_user_api_extend_video_veo_uapi_v1_video_extend_veo_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UapiGenerateHistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          }
+        ]
+      }
+    },
+    "/uapi/v1/video-gen/grok": {
+      "post": {
+        "tags": [
+          "user-api-grok"
+        ],
+        "summary": "User Api Generate Video Grok",
+        "description": "User API for Grok video generation.\nReturns history immediately and processes video in background.",
+        "operationId": "user_api_generate_video_grok_uapi_v1_video_gen_grok_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_user_api_generate_video_grok_uapi_v1_video_gen_grok_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UapiGenerateHistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          }
+        ]
+      }
+    },
+    "/uapi/v1/video-extend/grok": {
+      "post": {
+        "tags": [
+          "user-api-grok"
+        ],
+        "summary": "User Api Extend Video Grok",
+        "description": "User API for Grok video extension.\nExtends an existing video using its last frame as reference.\nReturns history immediately and processes video in background.\n\nArgs:\n    prompt: Text prompt for video extension\n    ref_history: UUID of the original video generation history\n    duration: Optional video duration (4-10s). Defaults to ref_history duration\n    mode: Optional Grok mode (spicy, fun, normal, custom). Defaults to ref_history mode\n    resolution: Optional resolution (480p, 720p). Defaults to ref_history resolution\n    db: Database session\n    user: Current authenticated user (via API key)\n\nReturns:\n    UapiGenerateHistoryResponse: Generation history response",
+        "operationId": "user_api_extend_video_grok_uapi_v1_video_extend_grok_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_user_api_extend_video_grok_uapi_v1_video_extend_grok_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UapiGenerateHistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          }
+        ]
+      }
+    },
+    "/uapi/v1/video-gen/seedance": {
+      "post": {
+        "tags": [
+          "user-api-seedance"
+        ],
+        "summary": "Generate Video Seedance",
+        "operationId": "generate_video_seedance_uapi_v1_video_gen_seedance_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_generate_video_seedance_uapi_v1_video_gen_seedance_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateHistoryGenApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          }
+        ]
+      }
+    },
+    "/uapi/v1/video-extend/seedance": {
+      "post": {
+        "tags": [
+          "user-api-seedance"
+        ],
+        "summary": "Extend Video Veo",
+        "operationId": "extend_video_veo_uapi_v1_video_extend_seedance_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_extend_video_veo_uapi_v1_video_extend_seedance_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateHistoryGenApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          }
+        ]
+      }
+    },
+    "/uapi/v1/video-storyboard/grok": {
+      "post": {
+        "tags": [
+          "user-api-storyboard"
+        ],
+        "summary": "User Api Grok Storyboard",
+        "description": "Generate a storyboard video from multiple scenes.\n\nEach scene is rendered as an independent clip. The last frame of clip N is\nautomatically used as the reference image for clip N+1 (chain-extend).\nAll clips are merged into one final video before credits are deducted.\n\n**Grok constraints**\n- `duration` per scene: 6 or 10 seconds\n- Total duration across all scenes: ≤ 45 s\n- Min 2 scenes, max 10 scenes\n- Not available on Free plan\n\n`scenes` must be a JSON string, e.g.:\n```json\n[{\"prompt\": \"A cat walking\", \"duration\": 6, \"mode\": \"custom\"},\n {\"prompt\": \"A dog running\", \"duration\": 10, \"mode\": \"fun\"}]\n```\n`files`: Optional reference images mapped by scene index (files[0] → scene 0 ref, etc.).\n         Only scene 0 uses the ref image for generation; extend scenes chain from the\n         previous clip's last frame.",
+        "operationId": "user_api_grok_storyboard_uapi_v1_video_storyboard_grok_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_user_api_grok_storyboard_uapi_v1_video_storyboard_grok_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UapiGenerateHistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          }
+        ]
+      }
+    },
+    "/uapi/v1/account": {
+      "get": {
+        "tags": [
+          "user-api-user"
+        ],
+        "summary": "Get Account Info",
+        "description": "Get user information",
+        "operationId": "get_account_info_uapi_v1_account_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserApiResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          }
+        ]
+      }
+    },
+    "/uapi/v1/video-gen/kling": {
+      "post": {
+        "tags": [
+          "user-api-kling"
+        ],
+        "summary": "Generate Video Kling",
+        "description": "Generate a video with Kling or kling models.\n\nKling model (kling-video-3-0):\n  - mode: standard | professional | relax | professional_audio\n  - aspect_ratio: 16:9 | 9:16 | 1:1\n  - duration: 3-15 seconds",
+        "operationId": "generate_video_kling_uapi_v1_video_gen_kling_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          },
+          {
+            "name": "mode_image",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "frame",
+              "title": "Mode Image"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_generate_video_kling_uapi_v1_video_gen_kling_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateHistoryGenApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/uapi/v1/video-extend/kling": {
+      "post": {
+        "tags": [
+          "user-api-kling"
+        ],
+        "summary": "Extend Video Kling",
+        "operationId": "extend_video_kling_uapi_v1_video_extend_kling_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_extend_video_kling_uapi_v1_video_extend_kling_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateHistoryGenApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          }
+        ]
+      }
+    },
+    "/uapi/v1/video-gen/meta": {
+      "post": {
+        "tags": [
+          "user-api-meta"
+        ],
+        "summary": "User Api Generate Video Meta",
+        "description": "User API for Meta AI video generation.\n\nMirrors the internal /video-gen/meta flow: validate inputs, charge credit,\ncreate history, stage one reference image to S3, then enqueue an SQS job\nfor the meta-video-gen-batch worker. Returns the generation history\nimmediately; clients poll the history endpoint for progress/results.",
+        "operationId": "user_api_generate_video_meta_uapi_v1_video_gen_meta_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_user_api_generate_video_meta_uapi_v1_video_gen_meta_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UapiGenerateHistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          }
+        ]
+      }
+    },
+    "/uapi/v1/imagen/grok": {
+      "post": {
+        "tags": [
+          "user-api-grok",
+          "image_gen"
+        ],
+        "summary": "Generate Uapi Grok Image",
+        "operationId": "generate_uapi_grok_image_uapi_v1_imagen_grok_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_generate_uapi_grok_image_uapi_v1_imagen_grok_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateHistoryGenApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          }
+        ]
+      }
+    },
+    "/uapi/v1/imagen/gpt-image-2": {
+      "post": {
+        "tags": [
+          "user-api-gpt-image-2",
+          "image_gen"
+        ],
+        "summary": "Generate Uapi Gpt Image2",
+        "description": "Generate an image using GPT Image 2 via VMedia provider (User API).\n\nText-to-image: provide only a prompt.\nImage-to-image: provide a prompt + ref_history or files for editing via subjects.\n\nArgs:\n    prompt: Text prompt for image generation\n    aspect_ratio: Image aspect ratio (1:1, 16:9, 9:16, 4:3, 21:9, 3:2, 2:3, 3:4)\n    mode: Generation mode (low, medium, high)\n    resolution: Image resolution (1k, 2k, 4k, 4k_upscale, 8k, 10k, 12k)\n    ref_history: Optional reference history UUID for image-to-image\n    files: Optional uploaded reference files for subjects\n    current_user: Current authenticated user (via API key)\n    request_ip: Request IP address",
+        "operationId": "generate_uapi_gpt_image2_uapi_v1_imagen_gpt_image_2_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_generate_uapi_gpt_image2_uapi_v1_imagen_gpt_image_2_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateHistoryGenApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          }
+        ]
+      }
+    },
+    "/uapi/v2/imagen/grok": {
+      "post": {
+        "tags": [
+          "user-api-grok",
+          "image_gen-v2"
+        ],
+        "summary": "Generate Uapi Grok Image",
+        "operationId": "generate_uapi_grok_image_uapi_v2_imagen_grok_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_generate_uapi_grok_image_uapi_v2_imagen_grok_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateHistoryGenApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            },
+            "description": "API key used to authenticate the request."
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_extend_video_kling_uapi_v1_video_extend_kling_post": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "ref_history": {
+            "type": "string",
+            "title": "Ref History"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "default": "fast"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt",
+          "ref_history"
+        ],
+        "title": "Body_extend_video_kling_uapi_v1_video_extend_kling_post"
+      },
+      "Body_extend_video_veo_uapi_v1_video_extend_seedance_post": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "ref_history": {
+            "type": "string",
+            "title": "Ref History"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "default": "fast"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt",
+          "ref_history"
+        ],
+        "title": "Body_extend_video_veo_uapi_v1_video_extend_seedance_post"
+      },
+      "Body_generate_image_uapi_v1_generate_image_post": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "title": "Aspect Ratio",
+            "default": "1:1"
+          },
+          "files": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "binary"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files"
+          },
+          "file_urls": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Urls"
+          },
+          "ref_histories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ref Histories"
+          },
+          "number_of_images": {
+            "type": "integer",
+            "maximum": 4,
+            "minimum": 1,
+            "title": "Number Of Images",
+            "default": 1
+          },
+          "output_format": {
+            "type": "string",
+            "title": "Output Format",
+            "default": "png"
+          },
+          "resolution": {
+            "type": "string",
+            "title": "Resolution",
+            "default": "1K"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt",
+          "model"
+        ],
+        "title": "Body_generate_image_uapi_v1_generate_image_post"
+      },
+      "Body_generate_uapi_gpt_image2_uapi_v1_imagen_gpt_image_2_post": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "title": "Aspect Ratio",
+            "default": "1:1"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "default": "low"
+          },
+          "resolution": {
+            "type": "string",
+            "title": "Resolution",
+            "default": "2K"
+          },
+          "ref_history": {
+            "type": "string",
+            "title": "Ref History"
+          },
+          "files": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "binary"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "Body_generate_uapi_gpt_image2_uapi_v1_imagen_gpt_image_2_post"
+      },
+      "Body_generate_uapi_grok_image_uapi_v1_imagen_grok_post": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "orientation": {
+            "type": "string",
+            "title": "Orientation",
+            "default": "landscape"
+          },
+          "num_result": {
+            "type": "integer",
+            "title": "Num Result",
+            "default": 1
+          },
+          "ref_history": {
+            "type": "string",
+            "title": "Ref History"
+          },
+          "files": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "binary"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "Body_generate_uapi_grok_image_uapi_v1_imagen_grok_post"
+      },
+      "Body_generate_uapi_grok_image_uapi_v2_imagen_grok_post": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "orientation": {
+            "type": "string",
+            "title": "Orientation",
+            "default": "landscape"
+          },
+          "num_result": {
+            "type": "integer",
+            "title": "Num Result",
+            "default": 1
+          },
+          "ref_images": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Images"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "Body_generate_uapi_grok_image_uapi_v2_imagen_grok_post"
+      },
+      "Body_generate_video_kling_uapi_v1_video_gen_kling_post": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "default": "standard"
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "title": "Aspect Ratio",
+            "default": "16:9"
+          },
+          "duration": {
+            "type": "string",
+            "title": "Duration",
+            "default": "5"
+          },
+          "ref_images": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Images"
+          },
+          "ref_videos": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Videos"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt",
+          "model"
+        ],
+        "title": "Body_generate_video_kling_uapi_v1_video_gen_kling_post"
+      },
+      "Body_generate_video_seedance_uapi_v1_video_gen_seedance_post": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "resolution": {
+            "type": "string",
+            "title": "Resolution",
+            "default": "720p"
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "title": "Aspect Ratio",
+            "default": "16:9"
+          },
+          "duration": {
+            "type": "string",
+            "title": "Duration",
+            "default": "4"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "default": "fast"
+          },
+          "ref_images": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Images"
+          },
+          "ref_videos": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Videos"
+          },
+          "ref_audios": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Audios"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt",
+          "model"
+        ],
+        "title": "Body_generate_video_seedance_uapi_v1_video_gen_seedance_post"
+      },
+      "Body_uapi_generate_meta_ai_image_uapi_v1_meta_ai_generate_post": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "orientation": {
+            "type": "string",
+            "title": "Orientation",
+            "default": "landscape"
+          },
+          "ref_history": {
+            "type": "string",
+            "title": "Ref History"
+          },
+          "files": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "binary"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "Body_uapi_generate_meta_ai_image_uapi_v1_meta_ai_generate_post"
+      },
+      "Body_user_api_extend_video_grok_uapi_v1_video_extend_grok_post": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "ref_history": {
+            "type": "string",
+            "title": "Ref History"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt",
+          "ref_history"
+        ],
+        "title": "Body_user_api_extend_video_grok_uapi_v1_video_extend_grok_post"
+      },
+      "Body_user_api_extend_video_veo_uapi_v1_video_extend_veo_post": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "ref_history": {
+            "type": "string",
+            "title": "Ref History"
+          },
+          "last_frame": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "string",
+                "format": "binary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Frame"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt",
+          "ref_history"
+        ],
+        "title": "Body_user_api_extend_video_veo_uapi_v1_video_extend_veo_post"
+      },
+      "Body_user_api_generate_video_grok_uapi_v1_video_gen_grok_post": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model",
+            "default": "grok-video"
+          },
+          "duration": {
+            "type": "integer",
+            "title": "Duration",
+            "default": 6
+          },
+          "resolution": {
+            "type": "string",
+            "title": "Resolution",
+            "default": "480p"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "default": "custom"
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "title": "Aspect Ratio",
+            "default": "landscape"
+          },
+          "files": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "binary"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files"
+          },
+          "file_urls": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Urls"
+          },
+          "ref_images": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Images"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "Body_user_api_generate_video_grok_uapi_v1_video_gen_grok_post"
+      },
+      "Body_user_api_generate_video_meta_uapi_v1_video_gen_meta_post": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "orientation": {
+            "type": "string",
+            "title": "Orientation",
+            "default": "portrait"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model",
+            "default": "meta-ai-video"
+          },
+          "duration": {
+            "type": "integer",
+            "title": "Duration",
+            "default": 5
+          },
+          "ref_history": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref History"
+          },
+          "files": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "binary"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files"
+          },
+          "file_urls": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Urls"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "Body_user_api_generate_video_meta_uapi_v1_video_gen_meta_post"
+      },
+      "Body_user_api_generate_video_veo_uapi_v1_video_gen_veo_post": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "resolution": {
+            "type": "string",
+            "title": "Resolution",
+            "default": "720p"
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "title": "Aspect Ratio",
+            "default": "16:9"
+          },
+          "files": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "binary"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files"
+          },
+          "file_urls": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Urls"
+          },
+          "ref_images": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Images"
+          },
+          "ref_videos": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Videos"
+          },
+          "ref_history": {
+            "type": "string",
+            "title": "Ref History"
+          },
+          "duration": {
+            "type": "integer",
+            "title": "Duration"
+          },
+          "mode_image": {
+            "type": "string",
+            "title": "Mode Image"
+          },
+          "voice_media_id": {
+            "type": "string",
+            "title": "Voice Media Id"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt",
+          "model"
+        ],
+        "title": "Body_user_api_generate_video_veo_uapi_v1_video_gen_veo_post"
+      },
+      "Body_user_api_grok_storyboard_uapi_v1_video_storyboard_grok_post": {
+        "properties": {
+          "scenes": {
+            "type": "string",
+            "title": "Scenes"
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "enum": [
+              "landscape",
+              "portrait",
+              "square"
+            ],
+            "title": "Aspect Ratio",
+            "default": "landscape"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution",
+            "default": "480p"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model",
+            "default": "grok-video"
+          },
+          "ref_history": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref History"
+          },
+          "files": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "binary"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scenes"
+        ],
+        "title": "Body_user_api_grok_storyboard_uapi_v1_video_storyboard_grok_post"
+      },
+      "ConversionHistoriesUApiResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "result": {
+            "items": {
+              "$ref": "#/components/schemas/GenerateHistoryUApiResponse"
+            },
+            "type": "array",
+            "title": "Result"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "result"
+        ],
+        "title": "ConversionHistoriesUApiResponse"
+      },
+      "GenerateHistoryDeleteResult": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "result": {
+            "type": "string",
+            "title": "Result"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "result"
+        ],
+        "title": "GenerateHistoryDeleteResult"
+      },
+      "GenerateHistoryGenApiResponse": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uuid"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name",
+            "default": ""
+          },
+          "input_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Text"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type",
+            "default": ""
+          },
+          "status": {
+            "type": "integer",
+            "title": "Status",
+            "default": 1
+          },
+          "status_desc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Desc",
+            "default": ""
+          },
+          "status_percentage": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Percentage"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code",
+            "default": ""
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message",
+            "default": ""
+          },
+          "custom_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Prompt",
+            "default": ""
+          },
+          "expired_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expired At"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "emotion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emotion"
+          },
+          "estimated_credit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Credit",
+            "default": 0
+          },
+          "media_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Type",
+            "default": ""
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "delay_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delay Seconds",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "GenerateHistoryGenApiResponse"
+      },
+      "GenerateHistoryUApiResponse": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uuid"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name",
+            "default": ""
+          },
+          "input_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Text"
+          },
+          "negative_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negative Prompt"
+          },
+          "input_file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input File Path"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": ""
+          },
+          "used_credit": {
+            "type": "integer",
+            "title": "Used Credit",
+            "default": 0
+          },
+          "status": {
+            "type": "integer",
+            "title": "Status",
+            "default": 1
+          },
+          "status_desc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Desc",
+            "default": ""
+          },
+          "status_percentage": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Percentage"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code",
+            "default": ""
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message",
+            "default": ""
+          },
+          "custom_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Prompt",
+            "default": ""
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "file_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size",
+            "default": 0
+          },
+          "expired_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expired At"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          },
+          "thumbnail_urls": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Urls"
+          },
+          "last_frame_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Frame Url"
+          },
+          "story_board_config": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Story Board Config"
+          }
+        },
+        "type": "object",
+        "title": "GenerateHistoryUApiResponse"
+      },
+      "GeneratedImageResponse": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uuid"
+          },
+          "history_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History Id"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "image_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Uri"
+          },
+          "response_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Text"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "style": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Style"
+          },
+          "aspect_ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aspect Ratio"
+          },
+          "output_format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Format"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "person_generation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Person Generation"
+          },
+          "safety_filter_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Safety Filter Level"
+          },
+          "vmedia_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vmedia Id"
+          },
+          "vmedia_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vmedia Mode"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "file_download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Download Url"
+          },
+          "thumbnails": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ThumbnailSchemaResponse"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnails"
+          },
+          "base64_data": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base64 Data"
+          }
+        },
+        "type": "object",
+        "title": "GeneratedImageResponse"
+      },
+      "GeneratedVideoUapiResponse": {
+        "properties": {
+          "video_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Url"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration",
+            "default": 8
+          },
+          "aspect_ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aspect Ratio"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "grok_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grok Mode"
+          },
+          "seedance_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seedance Mode"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "has_watermark": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Watermark"
+          }
+        },
+        "type": "object",
+        "title": "GeneratedVideoUapiResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ProductResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "max_quantity": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Quantity"
+          },
+          "max_monthly_total_file": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Monthly Total File"
+          },
+          "max_file_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max File Size"
+          },
+          "price_divide_100": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Divide 100"
+          },
+          "base_credit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Credit"
+          },
+          "bonus_credit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bonus Credit"
+          },
+          "special_bonus_credit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Special Bonus Credit"
+          },
+          "days_of_valid": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days Of Valid"
+          },
+          "paypal_plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paypal Plan Id"
+          },
+          "features": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Features"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "ProductResponse"
+      },
+      "ReferenceItemUApiResponse": {
+        "properties": {
+          "media_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Type",
+            "default": "audio"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          }
+        },
+        "type": "object",
+        "title": "ReferenceItemUApiResponse"
+      },
+      "SingleGenerateHistoryUApiResponse": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uuid"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name",
+            "default": ""
+          },
+          "input_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Text"
+          },
+          "negative_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negative Prompt"
+          },
+          "input_file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input File Path"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": ""
+          },
+          "used_credit": {
+            "type": "integer",
+            "title": "Used Credit",
+            "default": 0
+          },
+          "status": {
+            "type": "integer",
+            "title": "Status",
+            "default": 1
+          },
+          "status_desc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Desc",
+            "default": ""
+          },
+          "status_percentage": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Percentage"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code",
+            "default": ""
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message",
+            "default": ""
+          },
+          "custom_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Prompt",
+            "default": ""
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "file_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size",
+            "default": 0
+          },
+          "expired_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expired At"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          },
+          "thumbnail_urls": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Urls"
+          },
+          "last_frame_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Frame Url"
+          },
+          "story_board_config": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Story Board Config"
+          },
+          "generated_video": {
+            "items": {
+              "$ref": "#/components/schemas/GeneratedVideoUapiResponse"
+            },
+            "type": "array",
+            "title": "Generated Video"
+          },
+          "generated_image": {
+            "items": {
+              "$ref": "#/components/schemas/GeneratedImageResponse"
+            },
+            "type": "array",
+            "title": "Generated Image"
+          },
+          "reference_item": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceItemUApiResponse"
+            },
+            "type": "array",
+            "title": "Reference Item"
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_video",
+          "generated_image",
+          "reference_item"
+        ],
+        "title": "SingleGenerateHistoryUApiResponse"
+      },
+      "ThumbnailSchemaResponse": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uuid"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uri"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "title": "ThumbnailSchemaResponse"
+      },
+      "UapiGenerateHistoryResponse": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uuid"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name",
+            "default": ""
+          },
+          "input_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Text"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type",
+            "default": ""
+          },
+          "status": {
+            "type": "integer",
+            "title": "Status",
+            "default": 1
+          },
+          "status_desc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Desc",
+            "default": ""
+          },
+          "status_percentage": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Percentage"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code",
+            "default": ""
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message",
+            "default": ""
+          },
+          "custom_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Prompt",
+            "default": ""
+          },
+          "expired_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expired At"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "estimated_credit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Credit",
+            "default": 0
+          },
+          "media_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Type",
+            "default": ""
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "delay_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delay Seconds",
+            "default": 0
+          },
+          "story_board_config": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Story Board Config"
+          }
+        },
+        "type": "object",
+        "title": "UapiGenerateHistoryResponse"
+      },
+      "UserApiResponse": {
+        "properties": {
+          "uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uuid"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active",
+            "default": true
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Id"
+          },
+          "user_credit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserCreditApiResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "user_benefits": {
+            "items": {
+              "$ref": "#/components/schemas/UserBenefitResponse"
+            },
+            "type": "array",
+            "title": "User Benefits",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "UserApiResponse"
+      },
+      "UserBenefitResponse": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "product": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expire_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expire At"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "estimated_remaining": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Remaining"
+          }
+        },
+        "type": "object",
+        "title": "UserBenefitResponse"
+      },
+      "UserCreditApiResponse": {
+        "properties": {
+          "locked_credit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locked Credit",
+            "default": 0
+          },
+          "available_credit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available Credit",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "UserCreditApiResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

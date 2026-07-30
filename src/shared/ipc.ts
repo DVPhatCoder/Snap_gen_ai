@@ -1,0 +1,17 @@
+export const IPC = {
+  getSettings: 'settings:get',
+  saveSettings: 'settings:save',
+  getKeys: 'keys:get',
+  saveKeys: 'keys:save',
+  testSnapgen: 'test:snapgen',
+  testOpenAI: 'test:openai',
+  testElevenLabs: 'test:elevenlabs',
+  listVoices: 'elevenlabs:voices',
+  generateScript: 'openai:script',
+  startGenerate: 'job:start',
+  jobProgress: 'job:progress',
+  openPath: 'shell:openPath',
+  showItemInFolder: 'shell:showItem',
+  exportVideo: 'job:export',
+  getModels: 'models:list',
+} as const;
