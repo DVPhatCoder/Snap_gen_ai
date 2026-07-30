@@ -1,14 +1,22 @@
 import type { ForgeConfig } from '@electron-forge/shared-types';
 import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerZIP } from '@electron-forge/maker-zip';
+import { MakerDMG } from '@electron-forge/maker-dmg';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 
 const config: ForgeConfig = {
   packagerConfig: {
-    asar: true,
+    asar: {
+      // ffmpeg/ffprobe binaries must be executable outside the asar archive
+      unpack: '**/node_modules/{ffmpeg-static,ffprobe-static}/**',
+    },
   },
   rebuildConfig: {},
-  makers: [new MakerSquirrel({}), new MakerZIP({}, ['darwin', 'linux', 'win32'])],
+  makers: [
+    new MakerSquirrel({}),
+    new MakerDMG({}, ['darwin']),
+    new MakerZIP({}, ['darwin', 'linux', 'win32']),
+  ],
   plugins: [
     new VitePlugin({
       build: [

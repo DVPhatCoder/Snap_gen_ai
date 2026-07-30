@@ -12,6 +12,7 @@
     "lint": "tsc --noEmit",
     "package": "electron-forge package",
     "make": "electron-forge make",
+    "make:mac": "electron-forge make --platform=darwin",
     "clean": "node -e \"require('fs').rmSync('.vite',{recursive:true,force:true}); require('fs').rmSync('out',{recursive:true,force:true});\""
   },
   "keywords": [
@@ -25,6 +26,7 @@
   "license": "MIT",
   "devDependencies": {
     "@electron-forge/cli": "^7.8.1",
+    "@electron-forge/maker-dmg": "^7.11.2",
     "@electron-forge/maker-squirrel": "^7.8.1",
     "@electron-forge/maker-zip": "^7.8.1",
     "@electron-forge/plugin-vite": "^7.8.1",
