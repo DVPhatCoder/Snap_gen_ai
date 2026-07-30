@@ -1,14 +1,15 @@
-import type { ModelOption, VideoFamily } from '../../shared/types';
+import type { ImageFamily, MediaKind, ModelOption, VideoFamily } from '../../shared/types';
 
 interface Props {
-  families: { id: VideoFamily; label: string }[];
+  mediaKind: MediaKind;
+  families: { id: string; label: string }[];
   models: ModelOption[];
-  family: VideoFamily;
+  family: string;
   modelId: string;
   aspectRatio: string;
   resolution: string;
   mode: string;
-  onFamilyChange: (f: VideoFamily) => void;
+  onFamilyChange: (f: VideoFamily | ImageFamily) => void;
   onModelChange: (id: string) => void;
   onAspectRatioChange: (v: string) => void;
   onResolutionChange: (v: string) => void;
@@ -16,19 +17,19 @@ interface Props {
 }
 
 export default function ModelPicker(props: Props) {
-  const familyModels = props.models.filter((m) => m.family === props.family);
+  const familyModels = props.models.filter((m) => m.family === props.family && m.kind === props.mediaKind);
   const selected = familyModels.find((m) => m.id === props.modelId) ?? familyModels[0];
   const modes = selected?.extraFields?.mode ?? [];
 
   return (
-    <div>
+    <div className="model-picker">
       <div className="grid-2">
         <div className="field">
-          <label htmlFor="family">Video family</label>
+          <label htmlFor="family">{props.mediaKind === 'image' ? 'Image family' : 'Video family'}</label>
           <select
             id="family"
             value={props.family}
-            onChange={(e) => props.onFamilyChange(e.target.value as VideoFamily)}
+            onChange={(e) => props.onFamilyChange(e.target.value as VideoFamily | ImageFamily)}
           >
             {props.families.map((f) => (
               <option key={f.id} value={f.id}>
@@ -97,9 +98,10 @@ export default function ModelPicker(props: Props) {
         </div>
       )}
 
-      <p className="muted">
-        Duration gợi ý / cảnh: {(selected?.durations ?? []).join(', ')}s — ChatGPT sẽ clamp theo
-        model.
+      <p className="hint">
+        {props.mediaKind === 'image'
+          ? `Thời lượng mỗi slide gợi ý: ${(selected?.durations ?? []).join(', ')}s — ảnh sẽ ghép thành slideshow theo narration.`
+          : `Mỗi lần gen tối đa ${Math.max(...(selected?.durations ?? [8]))}s. Cảnh dài hơn sẽ auto-extend trong cùng cảnh; cảnh khác là hard cut mới.`}
       </p>
     </div>
   );

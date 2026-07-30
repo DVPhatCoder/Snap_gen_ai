@@ -4,13 +4,21 @@ import type {
   ApiKeys,
   AppSettings,
   ConnectionTestResult,
+  CreateProjectInput,
+  ExportMediaRequest,
+  ExportMediaResult,
   GenerateIdeaInput,
   GenerateJobInput,
   GenerateJobResult,
+  ImageFamily,
   JobProgress,
+  ModelOption,
+  ProjectDetail,
+  ProjectDraft,
+  ProjectMeta,
   ScriptDraft,
+  VideoFamily,
 } from '../shared/types';
-import type { ModelOption, VideoFamily } from '../shared/types';
 
 const api = {
   getKeys: (): Promise<ApiKeys> => ipcRenderer.invoke(IPC.getKeys),
@@ -19,14 +27,15 @@ const api = {
   saveSettings: (settings: AppSettings): Promise<boolean> =>
     ipcRenderer.invoke(IPC.saveSettings, settings),
   getModels: (): Promise<{
+    videoFamilies: { id: VideoFamily; label: string }[];
+    imageFamilies: { id: ImageFamily; label: string }[];
+    videoModels: ModelOption[];
+    imageModels: ModelOption[];
     families: { id: VideoFamily; label: string }[];
     models: ModelOption[];
   }> => ipcRenderer.invoke(IPC.getModels),
   testSnapgen: (): Promise<ConnectionTestResult> => ipcRenderer.invoke(IPC.testSnapgen),
   testOpenAI: (): Promise<ConnectionTestResult> => ipcRenderer.invoke(IPC.testOpenAI),
-  testElevenLabs: (): Promise<ConnectionTestResult> => ipcRenderer.invoke(IPC.testElevenLabs),
-  listVoices: (): Promise<{ voice_id: string; name: string }[]> =>
-    ipcRenderer.invoke(IPC.listVoices),
   generateScript: (input: GenerateIdeaInput): Promise<ScriptDraft> =>
     ipcRenderer.invoke(IPC.generateScript, input),
   startGenerate: (input: GenerateJobInput): Promise<GenerateJobResult> =>
@@ -39,8 +48,25 @@ const api = {
   openPath: (target: string): Promise<string> => ipcRenderer.invoke(IPC.openPath, target),
   showItemInFolder: (target: string): Promise<void> =>
     ipcRenderer.invoke(IPC.showItemInFolder, target),
-  exportVideo: (sourcePath: string): Promise<string | null> =>
-    ipcRenderer.invoke(IPC.exportVideo, sourcePath),
+  exportVideo: (sourcePath: string, suggestedName?: string): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.exportVideo, sourcePath, suggestedName),
+  exportMedia: (request: ExportMediaRequest): Promise<ExportMediaResult | null> =>
+    ipcRenderer.invoke(IPC.exportMedia, request),
+  remuxProject: (projectId: string): Promise<GenerateJobResult> =>
+    ipcRenderer.invoke(IPC.remuxProject, projectId),
+
+  listProjects: (): Promise<ProjectMeta[]> => ipcRenderer.invoke(IPC.listProjects),
+  getProject: (id: string): Promise<ProjectDetail> => ipcRenderer.invoke(IPC.getProject, id),
+  createProject: (input: CreateProjectInput): Promise<ProjectMeta> =>
+    ipcRenderer.invoke(IPC.createProject, input),
+  renameProject: (id: string, name: string): Promise<ProjectMeta> =>
+    ipcRenderer.invoke(IPC.renameProject, id, name),
+  deleteProject: (id: string): Promise<boolean> => ipcRenderer.invoke(IPC.deleteProject, id),
+  saveProjectDraft: (
+    id: string,
+    draft: ProjectDraft,
+    patch?: { name?: string }
+  ): Promise<ProjectMeta> => ipcRenderer.invoke(IPC.saveProjectDraft, id, draft, patch),
 };
 
 contextBridge.exposeInMainWorld('studio', api);

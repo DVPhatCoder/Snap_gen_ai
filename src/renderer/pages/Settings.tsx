@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react';
 import type { ApiKeys, AppSettings } from '../../shared/types';
+import { OPENAI_TTS_MODELS, OPENAI_TTS_VOICES } from '../../shared/types';
 
 export default function Settings() {
   const [keys, setKeys] = useState<ApiKeys>({
     snapgenApiKey: '',
     openaiApiKey: '',
-    elevenLabsApiKey: '',
   });
   const [settings, setSettings] = useState<AppSettings>({
     openaiModel: 'gpt-4o-mini',
-    elevenLabsVoiceId: 'JBFqnCBsd6RMkjVDRZzb',
+    openaiTtsModel: 'gpt-4o-mini-tts',
+    openaiTtsVoice: 'nova',
     burnSubtitles: false,
   });
-  const [voices, setVoices] = useState<{ voice_id: string; name: string }[]>([]);
   const [msg, setMsg] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -29,7 +29,10 @@ export default function Settings() {
     try {
       await window.studio.saveKeys(keys);
       await window.studio.saveSettings(settings);
-      setMsg({ type: 'ok', text: 'Đã lưu API keys và settings trên máy (encrypted nếu hệ thống hỗ trợ).' });
+      setMsg({
+        type: 'ok',
+        text: 'Đã lưu API keys và settings trên máy (encrypted nếu hệ thống hỗ trợ).',
+      });
     } catch (err) {
       setMsg({ type: 'error', text: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -37,21 +40,13 @@ export default function Settings() {
     }
   };
 
-  const test = async (kind: 'snapgen' | 'openai' | 'eleven') => {
+  const test = async (kind: 'snapgen' | 'openai') => {
     setBusy(true);
     setMsg(null);
     try {
       await window.studio.saveKeys(keys);
-      const res =
-        kind === 'snapgen'
-          ? await window.studio.testSnapgen()
-          : kind === 'openai'
-            ? await window.studio.testOpenAI()
-            : await window.studio.testElevenLabs();
+      const res = kind === 'snapgen' ? await window.studio.testSnapgen() : await window.studio.testOpenAI();
       setMsg({ type: res.ok ? 'ok' : 'error', text: res.message });
-      if (kind === 'eleven' && res.ok) {
-        setVoices(await window.studio.listVoices());
-      }
     } catch (err) {
       setMsg({ type: 'error', text: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -60,78 +55,89 @@ export default function Settings() {
   };
 
   return (
-    <div className="panel">
-      <h1>Cấu hình API Keys</h1>
-      <p className="sub">
-        Nhập key trực tiếp trên giao diện — không cần sửa file .env. Key được lưu local trong userData
-        của Electron.
-      </p>
-
-      <div className="field">
-        <label htmlFor="snapgen">Snapgen API Key (x-api-key)</label>
-        <input
-          id="snapgen"
-          type="password"
-          value={keys.snapgenApiKey}
-          onChange={(e) => setKeys({ ...keys, snapgenApiKey: e.target.value })}
-          placeholder="sk_..."
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="openai">OpenAI API Key (ChatGPT kịch bản)</label>
-        <input
-          id="openai"
-          type="password"
-          value={keys.openaiApiKey}
-          onChange={(e) => setKeys({ ...keys, openaiApiKey: e.target.value })}
-          placeholder="sk-..."
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="eleven">ElevenLabs API Key (voice + subs)</label>
-        <input
-          id="eleven"
-          type="password"
-          value={keys.elevenLabsApiKey}
-          onChange={(e) => setKeys({ ...keys, elevenLabsApiKey: e.target.value })}
-          placeholder="xi-..."
-        />
+    <div className="panel settings-panel">
+      <div className="panel-hero">
+        <p className="eyebrow">Cấu hình</p>
+        <h1>API &amp; Voice</h1>
+        <p className="sub">
+          Snapgen cho video/ảnh · OpenAI cho kịch bản, TTS voiceover và Whisper subtitle. Key lưu
+          local trong userData.
+        </p>
       </div>
 
-      <div className="grid-2">
+      <section className="settings-block">
+        <h2>API Keys</h2>
         <div className="field">
-          <label htmlFor="omodel">OpenAI model</label>
+          <label htmlFor="snapgen">Snapgen API Key</label>
           <input
-            id="omodel"
-            value={settings.openaiModel}
-            onChange={(e) => setSettings({ ...settings, openaiModel: e.target.value })}
+            id="snapgen"
+            type="password"
+            value={keys.snapgenApiKey}
+            onChange={(e) => setKeys({ ...keys, snapgenApiKey: e.target.value })}
+            placeholder="sk_..."
           />
         </div>
         <div className="field">
-          <label htmlFor="voice">ElevenLabs Voice ID</label>
+          <label htmlFor="openai">OpenAI API Key</label>
           <input
-            id="voice"
-            value={settings.elevenLabsVoiceId}
-            onChange={(e) => setSettings({ ...settings, elevenLabsVoiceId: e.target.value })}
-            list="voice-list"
+            id="openai"
+            type="password"
+            value={keys.openaiApiKey}
+            onChange={(e) => setKeys({ ...keys, openaiApiKey: e.target.value })}
+            placeholder="sk-..."
           />
-          <datalist id="voice-list">
-            {voices.map((v) => (
-              <option key={v.voice_id} value={v.voice_id}>
-                {v.name}
+        </div>
+      </section>
+
+      <section className="settings-block">
+        <h2>OpenAI models</h2>
+        <div className="grid-2">
+          <div className="field">
+            <label htmlFor="omodel">Chat model (kịch bản)</label>
+            <input
+              id="omodel"
+              value={settings.openaiModel}
+              onChange={(e) => setSettings({ ...settings, openaiModel: e.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="tts-model">TTS model (voiceover)</label>
+            <select
+              id="tts-model"
+              value={settings.openaiTtsModel}
+              onChange={(e) => setSettings({ ...settings, openaiTtsModel: e.target.value })}
+            >
+              {OPENAI_TTS_MODELS.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="tts-voice">TTS voice</label>
+          <select
+            id="tts-voice"
+            value={settings.openaiTtsVoice}
+            onChange={(e) => setSettings({ ...settings, openaiTtsVoice: e.target.value })}
+          >
+            {OPENAI_TTS_VOICES.map((v) => (
+              <option key={v} value={v}>
+                {v}
               </option>
             ))}
-          </datalist>
+          </select>
         </div>
-      </div>
+      </section>
 
-      <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      <label className="check-row">
         <input
           type="checkbox"
           checked={settings.burnSubtitles}
           onChange={(e) => setSettings({ ...settings, burnSubtitles: e.target.checked })}
         />
-        Burn-in subtitles vào video cuối (thay vì chỉ file .srt)
+        <span>Burn-in subtitle vào video cuối (Whisper SRT)</span>
       </label>
 
       <div className="row-actions">
@@ -143,9 +149,6 @@ export default function Settings() {
         </button>
         <button type="button" className="btn" disabled={busy} onClick={() => void test('openai')}>
           Test OpenAI
-        </button>
-        <button type="button" className="btn" disabled={busy} onClick={() => void test('eleven')}>
-          Test ElevenLabs
         </button>
       </div>
 

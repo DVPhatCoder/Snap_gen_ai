@@ -6,12 +6,12 @@ import type { ApiKeys, AppSettings } from '../shared/types';
 const DEFAULT_KEYS: ApiKeys = {
   snapgenApiKey: '',
   openaiApiKey: '',
-  elevenLabsApiKey: '',
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
   openaiModel: 'gpt-4o-mini',
-  elevenLabsVoiceId: 'JBFqnCBsd6RMkjVDRZzb',
+  openaiTtsModel: 'gpt-4o-mini-tts',
+  openaiTtsVoice: 'nova',
   burnSubtitles: false,
 };
 
@@ -21,8 +21,8 @@ function storePath(): string {
 
 interface StoreFile {
   keysEnc?: string;
-  keysPlain?: ApiKeys;
-  settings: AppSettings;
+  keysPlain?: ApiKeys & { elevenLabsApiKey?: string };
+  settings: AppSettings & { elevenLabsVoiceId?: string };
 }
 
 function readFile(): StoreFile {
@@ -47,22 +47,34 @@ export function getKeys(): ApiKeys {
   if (data.keysEnc && safeStorage.isEncryptionAvailable()) {
     try {
       const raw = safeStorage.decryptString(Buffer.from(data.keysEnc, 'base64'));
-      return { ...DEFAULT_KEYS, ...JSON.parse(raw) };
+      const parsed = JSON.parse(raw) as ApiKeys & { elevenLabsApiKey?: string };
+      return {
+        snapgenApiKey: parsed.snapgenApiKey ?? '',
+        openaiApiKey: parsed.openaiApiKey ?? '',
+      };
     } catch {
       return { ...DEFAULT_KEYS };
     }
   }
-  return { ...DEFAULT_KEYS, ...(data.keysPlain ?? {}) };
+  const plain = (data.keysPlain ?? {}) as Partial<ApiKeys>;
+  return {
+    snapgenApiKey: plain.snapgenApiKey ?? '',
+    openaiApiKey: plain.openaiApiKey ?? '',
+  };
 }
 
 export function saveKeys(keys: ApiKeys): void {
   const data = readFile();
+  const clean: ApiKeys = {
+    snapgenApiKey: keys.snapgenApiKey,
+    openaiApiKey: keys.openaiApiKey,
+  };
   if (safeStorage.isEncryptionAvailable()) {
-    const enc = safeStorage.encryptString(JSON.stringify(keys)).toString('base64');
+    const enc = safeStorage.encryptString(JSON.stringify(clean)).toString('base64');
     data.keysEnc = enc;
     delete data.keysPlain;
   } else {
-    data.keysPlain = keys;
+    data.keysPlain = clean;
     delete data.keysEnc;
   }
   writeFile(data);
@@ -70,7 +82,14 @@ export function saveKeys(keys: ApiKeys): void {
 
 export function getSettings(): AppSettings {
   const data = readFile();
-  return { ...DEFAULT_SETTINGS, ...data.settings };
+  const merged = { ...DEFAULT_SETTINGS, ...data.settings };
+  return {
+    openaiModel: merged.openaiModel || DEFAULT_SETTINGS.openaiModel,
+    openaiTtsModel: merged.openaiTtsModel || DEFAULT_SETTINGS.openaiTtsModel,
+    openaiTtsVoice: merged.openaiTtsVoice || DEFAULT_SETTINGS.openaiTtsVoice,
+    burnSubtitles: Boolean(merged.burnSubtitles),
+    lastExportDir: merged.lastExportDir || '',
+  };
 }
 
 export function saveSettings(settings: AppSettings): void {

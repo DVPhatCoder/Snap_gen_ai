@@ -1,13 +1,14 @@
 import type { ScriptDraft } from '../../shared/types';
-import { clampDuration } from '../../shared/models';
+import { maxSingleShotDuration } from '../../shared/models';
 
 interface Props {
   script: ScriptDraft;
   onChange: (s: ScriptDraft) => void;
   modelId: string;
+  mediaKind: 'video' | 'image';
 }
 
-export default function SceneEditor({ script, onChange, modelId }: Props) {
+export default function SceneEditor({ script, onChange, modelId, mediaKind }: Props) {
   const updateScene = (index: number, patch: Partial<ScriptDraft['scenes'][number]>) => {
     const scenes = script.scenes.map((s, i) => (i === index ? { ...s, ...patch } : s));
     const narration = scenes.map((s) => s.narration_segment).join(' ');
@@ -21,7 +22,7 @@ export default function SceneEditor({ script, onChange, modelId }: Props) {
         id: `scene-${script.scenes.length + 1}`,
         visual_prompt: '',
         narration_segment: '',
-        duration_hint: clampDuration(modelId, 8),
+        duration_hint: 8,
       },
     ];
     onChange({ ...script, scenes });
@@ -37,6 +38,8 @@ export default function SceneEditor({ script, onChange, modelId }: Props) {
     });
   };
 
+  const maxShot = maxSingleShotDuration(modelId);
+
   return (
     <div>
       <div className="field">
@@ -48,7 +51,7 @@ export default function SceneEditor({ script, onChange, modelId }: Props) {
         />
       </div>
       <div className="field">
-        <label htmlFor="narration">Narration đầy đủ (ElevenLabs)</label>
+        <label htmlFor="narration">Narration đầy đủ (OpenAI TTS + Whisper)</label>
         <textarea
           id="narration"
           value={script.narration}
@@ -65,7 +68,7 @@ export default function SceneEditor({ script, onChange, modelId }: Props) {
             </button>
           </div>
           <div className="field">
-            <label>Visual prompt (Snapgen)</label>
+            <label>{mediaKind === 'image' ? 'Image prompt (Snapgen)' : 'Visual prompt (Snapgen)'}</label>
             <textarea
               value={scene.visual_prompt}
               onChange={(e) => updateScene(index, { visual_prompt: e.target.value })}
@@ -79,16 +82,23 @@ export default function SceneEditor({ script, onChange, modelId }: Props) {
             />
           </div>
           <div className="field">
-            <label>Duration hint (giây)</label>
+            <label>{mediaKind === 'image' ? 'Thời lượng slide (giây)' : 'Duration hint (giây)'}</label>
             <input
               type="number"
+              min={1}
+              max={60}
               value={scene.duration_hint}
               onChange={(e) =>
                 updateScene(index, {
-                  duration_hint: clampDuration(modelId, Number(e.target.value) || 8),
+                  duration_hint: Math.min(60, Math.max(1, Number(e.target.value) || 8)),
                 })
               }
             />
+            {mediaKind === 'video' && scene.duration_hint > maxShot && (
+              <p className="hint">
+                &gt;{maxShot}s → cảnh này sẽ auto-extend (không nối sang cảnh khác).
+              </p>
+            )}
           </div>
         </div>
       ))}
