@@ -29,6 +29,16 @@ export default function Projects({ onOpenProject, onCreateAndOpen }: Props) {
     void refresh();
   }, [refresh]);
 
+  // While any project is "generating", keep the list fresh so badge flips to Hoàn tất.
+  useEffect(() => {
+    const hasGenerating = projects.some((p) => p.status === 'generating');
+    if (!hasGenerating) return;
+    const timer = window.setInterval(() => {
+      void refresh();
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [projects, refresh]);
+
   const create = async () => {
     if (!newName.trim()) {
       setError('Nhập tên dự án trước.');

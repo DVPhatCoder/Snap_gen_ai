@@ -23,14 +23,23 @@ export interface ApiKeys {
 
 export interface AppSettings {
   openaiModel: string;
+  /** Default TTS cho dự án mới (fallback khi draft cũ thiếu). */
   openaiTtsModel: string;
   openaiTtsVoice: string;
-  /** Voiceover engine: OpenAI TTS or ElevenLabs (cookie session). */
   ttsProvider: 'openai' | 'elevenlabs';
   elevenLabsVoiceId: string;
   elevenLabsModelId: string;
   burnSubtitles: boolean;
   lastExportDir?: string;
+}
+
+/** Voiceover gắn theo từng dự án (lưu trong draft.json). */
+export interface ProjectVoiceSettings {
+  ttsProvider: 'openai' | 'elevenlabs';
+  openaiTtsModel: string;
+  openaiTtsVoice: string;
+  elevenLabsVoiceId: string;
+  elevenLabsModelId: string;
 }
 
 export interface ElevenLabsVoice {
@@ -67,11 +76,15 @@ export interface ExportMediaResult {
   files?: string[];
 }
 
+export type SceneSection = 'introduction' | 'body' | 'conclusion';
+
 export interface SceneDraft {
   id: string;
   visual_prompt: string;
   narration_segment: string;
   duration_hint: number;
+  /** Phần cấu trúc kịch bản cố định: mở đầu / thân / kết. */
+  section?: SceneSection;
 }
 
 export interface ScriptDraft {
@@ -137,6 +150,12 @@ export interface ProjectDraft {
   script: ScriptDraft | null;
   mediaKind: MediaKind;
   stylePrompt: string;
+  /** Voiceover theo dự án. */
+  ttsProvider: 'openai' | 'elevenlabs';
+  openaiTtsModel: string;
+  openaiTtsVoice: string;
+  elevenLabsVoiceId: string;
+  elevenLabsModelId: string;
 }
 
 export interface SceneMediaAsset {
@@ -170,6 +189,11 @@ export interface CreateProjectInput {
   mode?: string;
   mediaKind?: MediaKind;
   stylePrompt?: string;
+  ttsProvider?: 'openai' | 'elevenlabs';
+  openaiTtsModel?: string;
+  openaiTtsVoice?: string;
+  elevenLabsVoiceId?: string;
+  elevenLabsModelId?: string;
 }
 
 export interface GenerateJobInput {
@@ -191,6 +215,12 @@ export interface GenerateJobInput {
   regenerateSceneIds?: string[];
   /** When false and narration already exists, skip TTS + Whisper. Default true. */
   refreshNarration?: boolean;
+  /** Voiceover theo dự án (ưu tiên hơn AppSettings). */
+  ttsProvider?: 'openai' | 'elevenlabs';
+  openaiTtsModel?: string;
+  openaiTtsVoice?: string;
+  elevenLabsVoiceId?: string;
+  elevenLabsModelId?: string;
 }
 
 export type JobPhase =
@@ -230,6 +260,78 @@ export interface GenerateJobResult {
 export interface ConnectionTestResult {
   ok: boolean;
   message: string;
+}
+
+export type ProviderQuotaId = 'snapgen' | 'elevenlabs';
+
+export interface ProviderQuota {
+  id: ProviderQuotaId;
+  label: string;
+  ok: boolean;
+  message: string;
+  remaining?: number;
+  used?: number;
+  limit?: number;
+  unit?: 'credit' | 'character' | 'USD' | 'token';
+  plan?: string;
+  resetAt?: string;
+  detail?: string;
+}
+
+export interface UsageSnapshot {
+  updatedAt: string;
+  providers: ProviderQuota[];
+}
+
+export interface UsageHistoryItem {
+  id: string;
+  provider: ProviderQuotaId;
+  title: string;
+  detail?: string;
+  amount: number;
+  unit: 'credit' | 'character';
+  status?: string;
+  createdAt: string;
+}
+
+export interface ProviderUsageHistory {
+  provider: ProviderQuotaId;
+  label: string;
+  ok: boolean;
+  message: string;
+  totalAmount: number;
+  unit: 'credit' | 'character';
+  items: UsageHistoryItem[];
+  /** Còn trang/cursor để tải thêm. */
+  hasMore?: boolean;
+  /** Snapgen page tiếp theo (1-based đã fetch xong → next = page + 1). */
+  nextPage?: number;
+  /** ElevenLabs start_after_history_item_id. */
+  nextCursor?: string;
+  /** Tổng record Snapgen (nếu API trả). */
+  totalCount?: number;
+}
+
+export interface UsageHistorySnapshot {
+  updatedAt: string;
+  providers: ProviderUsageHistory[];
+}
+
+export interface LoadMoreUsageHistoryRequest {
+  provider: ProviderQuotaId;
+  page?: number;
+  cursor?: string;
+}
+
+export interface LoadMoreUsageHistoryResult {
+  provider: ProviderQuotaId;
+  ok: boolean;
+  message: string;
+  items: UsageHistoryItem[];
+  hasMore: boolean;
+  nextPage?: number;
+  nextCursor?: string;
+  totalCount?: number;
 }
 
 export interface ElevenLabsSessionStatus {

@@ -8,7 +8,7 @@ const config: ForgeConfig = {
   packagerConfig: {
     asar: {
       // ffmpeg/ffprobe binaries must be executable outside the asar archive
-      unpack: '**/node_modules/{ffmpeg-static,ffprobe-static}/**',
+      unpack: '**/node_modules/{ffmpeg-static,ffprobe-static,sharp,@img}/**',
     },
   },
   rebuildConfig: {},

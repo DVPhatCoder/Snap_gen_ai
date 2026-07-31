@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import ffmpeg from 'fluent-ffmpeg';
+import { removeGeminiWatermarkFromFile } from './gemini-watermark';
 
 const require = createRequire(import.meta.url);
 
@@ -42,8 +43,91 @@ ffmpeg.setFfprobePath(resolveFfprobePath());
 
 function run(cmd: ffmpeg.FfmpegCommand): Promise<void> {
   return new Promise((resolve, reject) => {
-    cmd.on('end', () => resolve()).on('error', (err) => reject(err)).run();
+    const lines: string[] = [];
+    cmd
+      .on('stderr', (line: string) => {
+        if (lines.length < 40) lines.push(line);
+      })
+      .on('end', () => resolve())
+      .on('error', (err: Error) => {
+        const hint = lines.filter((l) => /error|invalid|failed|outside|unable/i.test(l)).slice(-6);
+        if (hint.length) {
+          reject(new Error(`${err.message}\n${hint.join('\n')}`));
+        } else {
+          reject(err);
+        }
+      })
+      .run();
   });
+}
+
+/** nano-banana / Gemini thường gắn sparkle logo góc dưới-phải. */
+export function isNanoBananaModel(modelId: string): boolean {
+  return /nano-banana/i.test(modelId);
+}
+
+async function probeImageSize(imagePath: string): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    ffmpeg.ffprobe(imagePath, (err, data) => {
+      if (err) {
+        resolve(null);
+        return;
+      }
+      const stream = data.streams?.find((s) => s.width && s.height);
+      if (!stream?.width || !stream?.height) {
+        resolve(null);
+        return;
+      }
+      resolve({ width: stream.width, height: stream.height });
+    });
+  });
+}
+
+/**
+ * Xóa watermark sparkle Gemini / nano-banana góc dưới-phải.
+ * Ưu tiên @pilio/gemini-watermark-remover (reverse alpha blending).
+ * Fallback FFmpeg delogo với tọa độ pixel cố định nếu engine bỏ qua / lỗi.
+ */
+export async function stripNanoBananaWatermark(imagePath: string): Promise<void> {
+  if (!fs.existsSync(imagePath)) return;
+
+  try {
+    const applied = await removeGeminiWatermarkFromFile(imagePath);
+    if (applied) return;
+  } catch {
+    // Fall through to delogo fallback.
+  }
+
+  const size = await probeImageSize(imagePath);
+  if (!size) return;
+
+  const logoW = Math.max(12, Math.floor(size.width * 0.085));
+  const logoH = Math.max(12, Math.floor(size.height * 0.085));
+  const x = Math.max(0, size.width - logoW - 2);
+  const y = Math.max(0, size.height - logoH - 2);
+  if (x + logoW > size.width || y + logoH > size.height) return;
+
+  const ext = path.extname(imagePath) || '.png';
+  const tmp = path.join(
+    path.dirname(imagePath),
+    `.wm-strip-${process.pid}-${Date.now()}${ext}`
+  );
+  try {
+    await run(
+      ffmpeg(imagePath)
+        .inputOptions(['-loop', '1'])
+        .videoFilters([`delogo=x=${x}:y=${y}:w=${logoW}:h=${logoH}:show=0`])
+        .outputOptions(['-frames:v', '1', '-update', '1', '-y'])
+        .output(tmp)
+    );
+    fs.renameSync(tmp, imagePath);
+  } catch {
+    try {
+      if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 export async function getDurationSeconds(filePath: string): Promise<number> {
@@ -204,6 +288,8 @@ export async function assembleFinalVideo(options: {
   workDir: string;
   estimatedTotalSeconds?: number;
   clipDurations?: number[];
+  /** When clips are already 1280x720@30 (e.g. Ken Burns slides), skip re-encode. */
+  skipClipNormalize?: boolean;
 }): Promise<string> {
   const { clipPaths, audioPath, srtPath, outputPath, burnSubtitles, workDir } = options;
   if (!clipPaths.length) throw new Error('No clips to assemble.');
@@ -215,6 +301,32 @@ export async function assembleFinalVideo(options: {
   const normalized: string[] = [];
   for (let i = 0; i < clipPaths.length; i++) {
     const out = path.join(workDir, `clip-${i}.mp4`);
+    if (options.skipClipNormalize) {
+      const planned = options.clipDurations?.[i];
+      const natural = await getDurationSafe(clipPaths[i], planned ?? 8);
+      if (planned == null || Math.abs(planned - natural) <= 0.08) {
+        fs.copyFileSync(clipPaths[i], out);
+        normalized.push(out);
+        continue;
+      }
+      // Duration mismatch: only trim/pad, do not re-scale (keeps Ken Burns smooth).
+      const filters: string[] = [];
+      if (planned > natural + 0.05) {
+        filters.push(`tpad=stop_mode=clone:stop_duration=${(planned - natural).toFixed(3)}`);
+      }
+      const cmd = ffmpeg(clipPaths[i]).outputOptions([
+        '-an',
+        '-c:v',
+        filters.length ? 'libx264' : 'copy',
+        ...(filters.length ? ['-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', '-r', '30'] : []),
+      ]);
+      if (filters.length) cmd.videoFilters(filters);
+      if (planned) cmd.outputOptions(['-t', String(planned)]);
+      await run(cmd.output(out));
+      normalized.push(out);
+      continue;
+    }
+
     const natural = await getDurationSafe(clipPaths[i], options.clipDurations?.[i] ?? 8);
     const planned = options.clipDurations?.[i];
     const filters = [
@@ -310,6 +422,42 @@ export async function assembleFinalVideo(options: {
   return outputPath;
 }
 
+/**
+ * Ken Burns — zoom-in only, smooth push-in then hold.
+ * Target ~115% (within 110–120%). Ease-in-out so motion feels like a
+ * gentle camera move, not a linear crawl. High-res source + zoompan to
+ * 1080p then lanczos down to 720p reduces sub-pixel shake.
+ */
+function kenBurnsFilters(durationSec: number): string[] {
+  const renderFps = 60;
+  const outFps = 30;
+  const frames = Math.max(Math.round(durationSec * renderFps), renderFps);
+  const last = Math.max(frames - 1, 1);
+  // 115% final scale — enough “push in”, stops instead of zooming forever.
+  const zMax = 1.15;
+  const delta = zMax - 1;
+
+  // Smoothstep ease-in-out: t²(3−2t), t = clamp(on/last, 0..1)
+  // Commas must be escaped for filtergraph.
+  const t = `min(1\\,on/${last})`;
+  const zExpr = `1+${delta.toFixed(8)}*((${t})*(${t})*(3-2*(${t})))`;
+
+  // Watermark strip is done separately (stripNanoBananaWatermark) — do NOT
+  // put delogo in this chain: expression-based delogo often fails with
+  // Windows exit 4294967274 (-22 EINVAL) and frame=0 before any output.
+  return [
+    // Oversample so each zoom step is a tiny fraction of a 720p pixel.
+    'scale=5120:2880:force_original_aspect_ratio=increase:flags=lanczos',
+    'crop=5120:2880',
+    'setsar=1',
+    'format=yuv420p',
+    // Keep float x/y (no trunc) — trunc caused 1px “jumps” that looked shaky.
+    `zoompan=z='${zExpr}':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1920x1080:fps=${renderFps}`,
+    'scale=1280:720:flags=lanczos',
+    `fps=${outFps}`,
+  ];
+}
+
 export async function assembleSlideshowFromImages(options: {
   imagePaths: string[];
   audioPath: string;
@@ -318,9 +466,19 @@ export async function assembleSlideshowFromImages(options: {
   burnSubtitles: boolean;
   workDir: string;
   durations?: number[];
+  /** Strip nano-banana watermark on each still before Ken Burns (safe, isolated). */
+  stripCornerLogo?: boolean;
 }): Promise<string> {
-  const { imagePaths, audioPath, srtPath, outputPath, burnSubtitles, workDir, durations } =
-    options;
+  const {
+    imagePaths,
+    audioPath,
+    srtPath,
+    outputPath,
+    burnSubtitles,
+    workDir,
+    durations,
+    stripCornerLogo = false,
+  } = options;
   if (!imagePaths.length) throw new Error('No images to assemble.');
 
   fs.mkdirSync(workDir, { recursive: true });
@@ -330,42 +488,79 @@ export async function assembleSlideshowFromImages(options: {
 
   const clips: string[] = [];
   for (let i = 0; i < imagePaths.length; i++) {
+    const imagePath = imagePaths[i];
+    if (!fs.existsSync(imagePath)) {
+      throw new Error(`Thiếu ảnh scene ${i + 1}: ${imagePath}`);
+    }
+    if (stripCornerLogo) {
+      await stripNanoBananaWatermark(imagePath);
+    }
     const out = path.join(workDir, `img-clip-${i}.mp4`);
     const dur = Math.max(durations?.[i] ?? fallback, 1);
-    await run(
-      ffmpeg(imagePaths[i])
-        .inputOptions(['-loop', '1', '-t', String(dur)])
-        .videoFilters([
-          'scale=1280:720:force_original_aspect_ratio=decrease',
-          'pad=1280:720:(ow-iw)/2:(oh-ih)/2:black',
-          'fps=30',
-        ])
-        .outputOptions([
-          '-t',
-          String(dur),
-          '-an',
-          '-c:v',
-          'libx264',
-          '-preset',
-          'veryfast',
-          '-pix_fmt',
-          'yuv420p',
-          '-r',
-          '30',
-        ])
-        .output(out)
-    );
+    const outFrames = Math.max(Math.round(dur * 30), 30);
+    try {
+      await run(
+        ffmpeg(imagePath)
+          .inputOptions(['-loop', '1', '-framerate', '60'])
+          .videoFilters(kenBurnsFilters(dur))
+          .outputOptions([
+            '-frames:v',
+            String(outFrames),
+            '-an',
+            '-c:v',
+            'libx264',
+            '-preset',
+            'medium',
+            '-crf',
+            '18',
+            '-pix_fmt',
+            'yuv420p',
+            '-r',
+            '30',
+          ])
+          .output(out)
+      );
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `FFmpeg lỗi khi tạo clip ảnh scene ${i + 1} (${path.basename(imagePath)}): ${detail}`
+      );
+    }
     clips.push(out);
   }
 
-  return assembleFinalVideo({
+  // Write to a temp file then rename so the UI never opens a half-written final.mp4.
+  const tempOutput = path.join(workDir, `final-build-${Date.now()}.mp4`);
+  await assembleFinalVideo({
     clipPaths: clips,
     audioPath,
     srtPath,
-    outputPath,
+    outputPath: tempOutput,
     burnSubtitles,
     workDir,
     estimatedTotalSeconds: estimatedTotal,
     clipDurations: durations,
+    skipClipNormalize: true,
   });
+
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  try {
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+  } catch {
+    // ignore locked file — rename may still replace on Windows
+  }
+  fs.renameSync(tempOutput, outputPath);
+
+  const beside = outputPath.replace(/\.mp4$/i, '.srt');
+  const tempSrt = tempOutput.replace(/\.mp4$/i, '.srt');
+  if (fs.existsSync(tempSrt)) {
+    try {
+      if (fs.existsSync(beside)) fs.unlinkSync(beside);
+      fs.renameSync(tempSrt, beside);
+    } catch {
+      fs.copyFileSync(tempSrt, beside);
+    }
+  }
+
+  return outputPath;
 }

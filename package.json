@@ -40,11 +40,14 @@
     "vite": "^5.4.19"
   },
   "dependencies": {
+    "@pilio/gemini-watermark-remover": "^1.0.33",
+    "country-flag-icons": "^1.6.20",
     "ffmpeg-static": "^5.2.0",
     "ffprobe-static": "^3.1.0",
     "fluent-ffmpeg": "^2.1.3",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "sharp": "^0.35.3"
   },
   "allowScripts": {
     "electron@37.10.3": true,

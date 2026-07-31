@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { ElevenLabsVoice } from '../../shared/types';
 import type { TranscriptWord } from './openai-audio';
@@ -247,6 +248,25 @@ export async function synthesizeWithElevenLabs(options: {
   fs.writeFileSync(srtPath, wordsToSrt(words), 'utf8');
 
   return { audioPath, srtPath, words, modelId };
+}
+
+/** Short TTS sample when voice has no preview_url (uses quota). */
+export async function previewElevenLabsVoice(options: {
+  voiceId: string;
+  modelId?: string;
+  language?: string;
+}): Promise<{ dataUrl: string }> {
+  const workDir = path.join(os.tmpdir(), 'snapgen-el-preview');
+  const result = await synthesizeWithElevenLabs({
+    text: 'Xin chào. Đây là bản nghe thử giọng đọc của SnapGen.',
+    voiceId: options.voiceId,
+    modelId: options.modelId,
+    language: options.language || 'vi',
+    outDir: workDir,
+    fileName: `preview-${options.voiceId.replace(/[^\w-]/g, '').slice(0, 24) || 'voice'}.mp3`,
+  });
+  const buf = fs.readFileSync(result.audioPath);
+  return { dataUrl: `data:audio/mpeg;base64,${buf.toString('base64')}` };
 }
 
 export const ELEVENLABS_TTS_MODELS = [

@@ -12,15 +12,23 @@ import type {
   VideoFamily,
 } from '../../shared/types';
 import {
+  defaultFamilyForKind,
+  defaultModelIdForKind,
   formatDurationLabel,
+  getModelById,
   maxSingleShotDuration,
   planScenesFromDuration,
+  resolveModelId,
 } from '../../shared/models';
+import { toLocalMediaUrl } from '../../shared/media-url';
 import ModelPicker from '../components/ModelPicker';
 import JobProgressView from '../components/JobProgress';
 import Timeline from '../components/Timeline';
 import ExportDialog, { buildExportableScenes } from '../components/ExportDialog';
 import GenerateScenesDialog from '../components/GenerateScenesDialog';
+import ProjectVoicePanel from '../components/ProjectVoicePanel';
+import type { ProjectVoiceSettings } from '../../shared/types';
+import { DEFAULT_PROJECT_VOICE, resolveProjectVoice } from '../../shared/voice';
 
 const DURATION_PRESETS_MIN = [0.5, 1, 2, 3, 5] as const;
 const DEFAULT_DURATION_MIN = 1;
@@ -49,12 +57,12 @@ const TOOL_ITEMS: Array<{ id: Tool; icon: string; label: string }> = [
   { id: 'ai', icon: '✦', label: 'AI Create' },
   { id: 'media', icon: '▧', label: 'Media' },
   { id: 'script', icon: '☷', label: 'Script' },
-  { id: 'audio', icon: '♫', label: 'Audio' },
+  { id: 'audio', icon: '♫', label: 'Giọng đọc' },
   { id: 'text', icon: 'T', label: 'Text' },
 ];
 
 function toFileUrl(filePath: string): string {
-  return `file:///${filePath.replace(/\\/g, '/')}`;
+  return toLocalMediaUrl(filePath);
 }
 
 function fileName(filePath: string): string {
@@ -77,8 +85,8 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
   const [projectName, setProjectName] = useState('Untitled project');
   const [activeProjectId, setActiveProjectId] = useState<string | null>(projectId);
   const [mediaKind, setMediaKind] = useState<MediaKind>('video');
-  const [family, setFamily] = useState<string>('veo');
-  const [modelId, setModelId] = useState('veo-3.1');
+  const [family, setFamily] = useState<string>(defaultFamilyForKind('video'));
+  const [modelId, setModelId] = useState(defaultModelIdForKind('video'));
   const [brief, setBrief] = useState('');
   const [stylePrompt, setStylePrompt] = useState('');
   const [language, setLanguage] = useState('Tiếng Việt');
@@ -106,6 +114,7 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
   const [exportOpen, setExportOpen] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
   const [hasNarration, setHasNarration] = useState(false);
+  const [voice, setVoice] = useState<ProjectVoiceSettings>({ ...DEFAULT_PROJECT_VOICE });
   const remuxTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const remuxRunning = useRef(false);
   const remuxPending = useRef<ScriptDraft | null>(null);
@@ -305,7 +314,10 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
   }, []);
 
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId) {
+      void window.studio.getSettings().then((s) => setVoice(resolveProjectVoice(null, s)));
+      return;
+    }
     void (async () => {
       setBusy(true);
       setError(null);
@@ -322,13 +334,17 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
           setTargetDurationMin(minutesFromSeconds(draft.targetDurationSec));
           setMediaKind(draft.mediaKind ?? 'video');
           setFamily(draft.family);
-          setModelId(draft.model);
+          setModelId(resolveModelId(draft.model));
           setAspectRatio(draft.aspectRatio);
           setResolution(draft.resolution);
           setMode(draft.mode ?? '');
           setStylePrompt(draft.stylePrompt ?? '');
           setScript(draft.script);
+          setVoice(resolveProjectVoice(draft));
           if (draft.script) setActiveTool('script');
+        } else {
+          const s = await window.studio.getSettings();
+          setVoice(resolveProjectVoice(null, s));
         }
         if (detail.videoPath) {
           setResult({
@@ -354,22 +370,54 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
     else if (selectedScene >= script.scenes.length) setSelectedScene(script.scenes.length - 1);
   }, [script, selectedScene]);
 
-  const applyKindDefaults = (kind: MediaKind) => {
-    setMediaKind(kind);
-    const pool = kind === 'image' ? imageModels : videoModels;
-    const first = pool[0];
-    if (first) {
-      setFamily(first.family);
-      setModelId(first.id);
-      setAspectRatio(first.defaultAspectRatio);
-      setResolution(first.defaultResolution);
-      setMode(first.extraFields?.mode?.[0] ?? '');
+  // Migrate deprecated Snapgen image models (e.g. imagen-4 → nano-banana-2).
+  useEffect(() => {
+    const resolved = resolveModelId(modelId);
+    if (resolved !== modelId) {
+      setModelId(resolved);
+      const selected = models.find((item) => item.id === resolved);
+      if (selected) {
+        setFamily(selected.family);
+        setAspectRatio(selected.defaultAspectRatio);
+        setResolution(selected.defaultResolution);
+      }
       return;
     }
-    setFamily(kind === 'image' ? 'gpt-image' : 'veo');
-    setModelId(kind === 'image' ? 'gpt-image-2' : 'veo-3.1');
+    if (models.length && !models.some((item) => item.id === modelId)) {
+      const fallback =
+        models.find((item) => item.family === family) || models[0];
+      if (fallback) {
+        setModelId(fallback.id);
+        setFamily(fallback.family);
+        setAspectRatio(fallback.defaultAspectRatio);
+        setResolution(fallback.defaultResolution);
+      }
+    }
+  }, [modelId, models, family]);
+
+  const applyKindDefaults = (kind: MediaKind) => {
+    setMediaKind(kind);
+    const preferredId = defaultModelIdForKind(kind);
+    const preferredFamily = defaultFamilyForKind(kind);
+    const pool = kind === 'image' ? imageModels : videoModels;
+    const preferred =
+      pool.find((item) => item.id === preferredId) ||
+      pool.find((item) => item.family === preferredFamily) ||
+      pool[0] ||
+      getModelById(preferredId);
+    if (preferred) {
+      setFamily(preferred.family);
+      setModelId(preferred.id);
+      setAspectRatio(preferred.defaultAspectRatio);
+      setResolution(preferred.defaultResolution);
+      setMode(preferred.extraFields?.mode?.[0] ?? '');
+      return;
+    }
+    setFamily(preferredFamily);
+    setModelId(preferredId);
     setAspectRatio('16:9');
-    setResolution(kind === 'image' ? '2k' : '720p');
+    setResolution(kind === 'image' ? '1K' : '720p');
+    setMode('');
   };
 
   const onFamilyChange = (nextFamily: VideoFamily | ImageFamily) => {
@@ -391,7 +439,10 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
     setMode(selected.extraFields?.mode?.[0] ?? '');
   };
 
-  const draftPayload = (nextScript: ScriptDraft | null = script) => ({
+  const draftPayload = (
+    nextScript: ScriptDraft | null = script,
+    voiceOverride?: ProjectVoiceSettings
+  ) => ({
     brief,
     language,
     sceneCount: nextScript?.scenes.length ?? scenePlan.sceneCountHint,
@@ -404,13 +455,60 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
     script: nextScript,
     mediaKind,
     stylePrompt,
+    ...(voiceOverride ?? voice),
   });
 
-  const ensureProject = async (): Promise<string> => {
+  /** Lưu giọng (và draft) theo đúng projectId — không phụ thuộc Settings toàn app. */
+  const persistProjectVoice = async (nextVoice: ProjectVoiceSettings): Promise<string | null> => {
     const name = projectName.trim() || 'Untitled project';
+    const payload = draftPayload(script, nextVoice);
+
+    if (activeProjectId) {
+      await window.studio.saveProjectDraft(activeProjectId, payload, { name });
+      return activeProjectId;
+    }
+
+    // Chưa có dự án: tạo ngay để gắn giọng, tránh mất khi thoát Studio.
+    const meta = await window.studio.createProject({
+      name,
+      brief,
+      language,
+      sceneCount: scenePlan.sceneCountHint,
+      targetDurationSec: scenePlan.targetDurationSec,
+      family: family as VideoFamily | ImageFamily,
+      model: modelId,
+      aspectRatio,
+      resolution,
+      mode: mode || undefined,
+      mediaKind,
+      stylePrompt,
+      ...nextVoice,
+    });
+    setActiveProjectId(meta.id);
+    onProjectReady(meta.id);
+    return meta.id;
+  };
+
+  const onVoiceChange = (next: ProjectVoiceSettings) => {
+    setVoice(next);
+    void (async () => {
+      try {
+        await persistProjectVoice(next);
+      } catch (err) {
+        setToast({
+          type: 'error',
+          text: err instanceof Error ? err.message : 'Không lưu được giọng dự án.',
+        });
+      }
+    })();
+  };
+
+  const ensureProject = async (voiceOverride?: ProjectVoiceSettings): Promise<string> => {
+    const name = projectName.trim() || 'Untitled project';
+    const v = voiceOverride ?? voice;
     if (activeProjectId) {
       await window.studio.renameProject(activeProjectId, name);
-      await window.studio.saveProjectDraft(activeProjectId, draftPayload(), { name });
+      await window.studio.saveProjectDraft(activeProjectId, draftPayload(script, v), { name });
       return activeProjectId;
     }
     const meta = await window.studio.createProject({
@@ -426,6 +524,7 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
       mode: mode || undefined,
       mediaKind,
       stylePrompt,
+      ...v,
     });
     setActiveProjectId(meta.id);
     onProjectReady(meta.id);
@@ -706,6 +805,7 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
         stylePrompt: stylePrompt.trim() || undefined,
         regenerateSceneIds: payload.regenerateSceneIds,
         refreshNarration: payload.refreshNarration,
+        ...voice,
       });
       setResult(generated);
       setHasNarration(Boolean(generated.audioPath));
@@ -853,6 +953,14 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
             onResolutionChange={setResolution}
             onModeChange={setMode}
           />
+
+          <div className="voice-inline-block">
+            <div className="field compact-field">
+              <label>Giọng đọc (theo dự án)</label>
+            </div>
+            <ProjectVoicePanel value={voice} disabled={busy} onChange={onVoiceChange} />
+          </div>
+
           <button
             type="button"
             className="editor-primary full-width"
@@ -878,26 +986,45 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
           </div>
           {script ? (
             <div className="scene-list">
-              {script.scenes.map((scene, index) => (
-                <button
-                  type="button"
-                  key={scene.id}
-                  className={`scene-list-item ${selectedScene === index ? 'active' : ''}`}
-                  onClick={() => {
-                    setSelectedScene(index);
-                    setPreviewMode('scene');
-                  }}
-                >
-                  <span className="scene-thumb">
-                    <span>{String(index + 1).padStart(2, '0')}</span>
-                  </span>
-                  <span className="scene-list-copy">
-                    <strong>Scene {index + 1}</strong>
-                    <small>{scene.visual_prompt || 'Empty visual prompt'}</small>
-                  </span>
-                  <span className="scene-duration">{scene.duration_hint}s</span>
-                </button>
-              ))}
+              {script.scenes.map((scene, index) => {
+                const asset =
+                  sceneMedia.find((item) => item.sceneId === scene.id) ?? sceneMedia[index];
+                const thumbUrl =
+                  asset?.exists && asset.kind === 'image' ? toFileUrl(asset.path) : null;
+                return (
+                  <button
+                    type="button"
+                    key={scene.id}
+                    className={`scene-list-item ${selectedScene === index ? 'active' : ''}`}
+                    onClick={() => {
+                      setSelectedScene(index);
+                      setPreviewMode('scene');
+                    }}
+                  >
+                    <span className={`scene-thumb ${thumbUrl ? 'has-media' : ''}`}>
+                      {thumbUrl ? (
+                        <img src={thumbUrl} alt="" />
+                      ) : (
+                        <span>{String(index + 1).padStart(2, '0')}</span>
+                      )}
+                    </span>
+                    <span className="scene-list-copy">
+                      <strong>
+                        Scene {index + 1}
+                        {scene.section === 'introduction'
+                          ? ' · Intro'
+                          : scene.section === 'conclusion'
+                            ? ' · Outro'
+                            : scene.section === 'body'
+                              ? ' · Body'
+                              : ''}
+                      </strong>
+                      <small>{scene.visual_prompt || 'Empty visual prompt'}</small>
+                    </span>
+                    <span className="scene-duration">{scene.duration_hint}s</span>
+                  </button>
+                );
+              })}
             </div>
           ) : (
             <div className="empty-panel">
@@ -931,6 +1058,8 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
             <div className="media-grid">
               {sceneMedia.map((asset, index) => {
                 const scene = script?.scenes[index];
+                const thumbUrl =
+                  asset.exists && asset.kind === 'image' ? toFileUrl(asset.path) : null;
                 return (
                   <button
                     type="button"
@@ -942,13 +1071,19 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
                       setPreviewMode('scene');
                     }}
                   >
-                    <span className="media-card-preview">
-                      <span>{asset.kind === 'video' ? '▶' : '▧'}</span>
+                    <span className={`media-card-preview ${thumbUrl ? 'has-media' : ''}`}>
+                      {thumbUrl ? (
+                        <img src={thumbUrl} alt="" />
+                      ) : (
+                        <span>{asset.kind === 'video' ? '▶' : '▧'}</span>
+                      )}
                       <small>{String(index + 1).padStart(2, '0')}</small>
                     </span>
                     <span className="media-card-copy">
                       <strong>Scene {index + 1}</strong>
-                      <small>{scene?.duration_hint ?? 0}s · {fileName(asset.path)}</small>
+                      <small>
+                        {scene?.duration_hint ?? 0}s · {fileName(asset.path)}
+                      </small>
                     </span>
                   </button>
                 );
@@ -974,22 +1109,46 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
       );
     }
 
+    if (activeTool === 'audio') {
+      return (
+        <>
+          <div className="editor-panel-heading">
+            <div>
+              <span className="panel-kicker">VOICE</span>
+              <h2>Giọng đọc dự án</h2>
+            </div>
+          </div>
+          <p className="media-note">
+            Mỗi dự án có giọng riêng — lưu trong draft, không dùng chung Settings toàn app.
+          </p>
+          <ProjectVoicePanel value={voice} disabled={busy} onChange={onVoiceChange} />
+          {result?.audioPath ? (
+            <button
+              type="button"
+              className="editor-secondary full-width media-folder-button"
+              onClick={() => void window.studio.showItemInFolder(result.audioPath)}
+            >
+              Mở file narration
+            </button>
+          ) : (
+            <p className="hint">Narration sẽ được tạo khi Generate (có refresh voiceover).</p>
+          )}
+        </>
+      );
+    }
+
     return (
       <>
         <div className="editor-panel-heading">
           <div>
-            <span className="panel-kicker">{activeTool.toUpperCase()}</span>
-            <h2>{activeTool === 'audio' ? 'Audio' : 'Text'}</h2>
+            <span className="panel-kicker">TEXT</span>
+            <h2>Text</h2>
           </div>
         </div>
         <div className="upload-dropzone">
-          <span>{activeTool === 'audio' ? '♫' : activeTool === 'text' ? 'T' : '＋'}</span>
-          <strong>
-            {activeTool === 'audio' ? 'Voiceover by OpenAI' : 'Captions by Whisper'}
-          </strong>
-          <p>
-            This track will be created automatically during generation.
-          </p>
+          <span>T</span>
+          <strong>Captions by Whisper / ElevenLabs</strong>
+          <p>Subtitle track được tạo tự động khi generate voiceover.</p>
         </div>
       </>
     );
@@ -1081,8 +1240,30 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
               <button
                 type="button"
                 className={previewMode === 'final' ? 'active' : ''}
-                disabled={!result}
-                onClick={() => setPreviewMode('final')}
+                disabled={!result && !hasSceneMedia}
+                onClick={() => {
+                  setPreviewMode('final');
+                  setPreviewKey((value) => value + 1);
+                  if (activeProjectId) {
+                    void window.studio.getProject(activeProjectId).then((detail) => {
+                      if (!detail.videoPath) return;
+                      setResult((prev) =>
+                        prev
+                          ? { ...prev, videoPath: detail.videoPath! }
+                          : {
+                              projectId: detail.meta.id,
+                              projectName: detail.meta.name,
+                              projectDir: detail.projectDir,
+                              videoPath: detail.videoPath!,
+                              srtPath: detail.srtPath ?? detail.videoPath!.replace(/\.mp4$/i, '.srt'),
+                              audioPath: detail.audioPath ?? '',
+                              title: detail.draft?.script?.title ?? detail.meta.name,
+                            }
+                      );
+                      setPreviewKey((value) => value + 1);
+                    });
+                  }
+                }}
               >
                 Final
               </button>
@@ -1105,18 +1286,25 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
                 />
               ) : previewMode === 'scene' && currentAsset?.exists ? (
                 <img
-                  className="editor-video"
+                  key={`${currentAsset.path}-${selectedScene}-${previewKey}`}
+                  className="editor-video editor-image"
                   src={toFileUrl(currentAsset.path)}
                   alt={`Scene ${selectedScene + 1}`}
                 />
               ) : previewMode === 'final' && result ? (
                 <video
-                  key={previewKey}
+                  key={`${result.videoPath}-${previewKey}`}
                   className="editor-video"
                   controls
                   src={toFileUrl(result.videoPath)}
                   {...videoEvents}
                 />
+              ) : previewMode === 'final' ? (
+                <div className="viewer-empty">
+                  <div className="empty-play">▶</div>
+                  <strong>Chưa có video Final</strong>
+                  <p>Bấm Generate hoặc Ghép lại video để tạo final.mp4.</p>
+                </div>
               ) : currentScene ? (
                 <div className="scene-preview-placeholder">
                   <span className="preview-index">SCENE {selectedScene + 1}</span>

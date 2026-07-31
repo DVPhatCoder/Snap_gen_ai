@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ImageFamily, VideoFamily } from '../../shared/types';
+import { resolveModelId } from '../../shared/models';
 
 const BASE = 'https://api.snapgen.ai';
 
@@ -9,6 +10,7 @@ export interface SnapgenHistory {
   uuid: string;
   status: number;
   status_percentage?: number;
+  error_code?: string;
   error_message?: string;
   generated_video?: Array<{
     video_url?: string | null;
@@ -18,6 +20,81 @@ export interface SnapgenHistory {
     image_url?: string | null;
     file_download_url?: string | null;
   }>;
+}
+
+/** Đổi thông báo lỗi Snapgen/Google sang tiếng Việt (giữ mã lỗi nếu có). */
+export function localizeSnapgenError(
+  message?: string | null,
+  errorCode?: string | null,
+  kind: 'video' | 'image' | 'request' = 'request'
+): string {
+  const raw = (message || '').trim();
+  const code = (errorCode || '').trim();
+  const blob = `${code} ${raw}`.toUpperCase();
+
+  const withCode = (vi: string) => (code ? `${vi} (mã: ${code})` : vi);
+
+  if (
+    blob.includes('UNSAFE_GENERATION') ||
+    blob.includes('DESCRIBE CHILDREN') ||
+    blob.includes("GOOGLE'S POLICIES") ||
+    blob.includes('CELEBRITY') ||
+    blob.includes('THIRD-PARTY CONTENT') ||
+    blob.includes('SPECIFIC CHARACTER')
+  ) {
+    return withCode(
+      'Prompt bị Google chặn vì có nội dung không an toàn (trẻ em, người nổi tiếng, nhân vật bản quyền / bên thứ ba). Hãy sửa mô tả cảnh rồi thử lại.'
+    );
+  }
+
+  if (blob.includes('NOT_ENOUGH_CREDIT') || blob.includes('INSUFFICIENT CREDIT')) {
+    return withCode('Không đủ credit Snapgen. Nạp thêm credit rồi thử lại.');
+  }
+
+  if (blob.includes('NOT_ENOUGH_AND_LOCK_CREDIT') || blob.includes('LOCKED CREDIT')) {
+    return withCode(
+      'Credit không đủ hoặc đang bị khóa (job khác đang chạy). Đợi job xong hoặc nạp thêm credit.'
+    );
+  }
+
+  if (blob.includes('INVALID_MODEL') || blob.includes('INVALID MODEL')) {
+    return withCode('Model không hợp lệ. Chọn model khác trong Studio rồi thử lại.');
+  }
+
+  if (blob.includes('RATE') && blob.includes('LIMIT')) {
+    return withCode('Đã vượt giới hạn số lần gọi API. Đợi một lát rồi thử lại.');
+  }
+
+  if (blob.includes('UNAUTHORIZED') || blob.includes('INVALID API') || blob.includes('401')) {
+    return withCode('Snapgen API key không hợp lệ hoặc hết hạn. Kiểm tra lại trong Settings.');
+  }
+
+  if (blob.includes('TIMEOUT') || blob.includes('TIMED OUT')) {
+    return withCode(
+      kind === 'image'
+        ? 'Hết thời gian chờ render ảnh Snapgen.'
+        : kind === 'video'
+          ? 'Hết thời gian chờ render video Snapgen.'
+          : 'Hết thời gian chờ phản hồi Snapgen.'
+    );
+  }
+
+  if (!raw) {
+    return withCode(
+      kind === 'image'
+        ? 'Tạo ảnh thất bại.'
+        : kind === 'video'
+          ? 'Tạo video thất bại.'
+          : 'Yêu cầu Snapgen thất bại.'
+    );
+  }
+
+  // Giữ nguyên nếu đã tiếng Việt; còn lại gắn prefix rõ nguồn.
+  if (/[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(raw)) {
+    return code ? `${raw} (mã: ${code})` : raw;
+  }
+
+  return withCode(`Lỗi Snapgen: ${raw}`);
 }
 
 export interface GenerateVideoParams {
@@ -66,7 +143,19 @@ export async function testAccount(apiKey: string): Promise<{ ok: boolean; messag
     if (!res.ok) {
       return { ok: false, message: `HTTP ${res.status}: ${text.slice(0, 200)}` };
     }
-    return { ok: true, message: 'Snapgen API key hợp lệ.' };
+    let creditHint = '';
+    try {
+      const data = JSON.parse(text) as {
+        user_credit?: { available_credit?: number; locked_credit?: number };
+      };
+      const available = data.user_credit?.available_credit;
+      if (typeof available === 'number') {
+        creditHint = ` Credit còn lại: ${available.toLocaleString('vi-VN')}.`;
+      }
+    } catch {
+      /* ignore */
+    }
+    return { ok: true, message: `Snapgen API key hợp lệ.${creditHint}` };
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : String(err) };
   }
@@ -104,9 +193,14 @@ export async function generateVideo(params: GenerateVideoParams): Promise<Snapge
   const data = (await res.json()) as SnapgenHistory & { detail?: unknown; message?: string };
   if (!res.ok) {
     throw new Error(
-      typeof data.message === 'string'
-        ? data.message
-        : `Snapgen ${params.family} failed: HTTP ${res.status} ${JSON.stringify(data).slice(0, 300)}`
+      localizeSnapgenError(
+        typeof data.message === 'string' ? data.message : undefined,
+        typeof (data as { error_code?: string }).error_code === 'string'
+          ? (data as { error_code?: string }).error_code
+          : undefined,
+        'request'
+      ) ||
+        `Snapgen ${params.family} thất bại: HTTP ${res.status}`
     );
   }
   if (!data.uuid) {
@@ -132,7 +226,7 @@ export async function generateImage(params: GenerateImageParams): Promise<Snapge
     if (params.mode) form.append('mode', params.mode);
   } else {
     url = `${BASE}/uapi/v1/generate_image`;
-    form.append('model', params.model);
+    form.append('model', resolveModelId(params.model));
     form.append('aspect_ratio', params.aspectRatio);
     form.append('resolution', params.resolution);
     form.append('number_of_images', '1');
@@ -148,13 +242,15 @@ export async function generateImage(params: GenerateImageParams): Promise<Snapge
   const data = (await res.json()) as SnapgenHistory & { detail?: unknown; message?: string };
   if (!res.ok) {
     throw new Error(
-      typeof data.message === 'string'
-        ? data.message
-        : `Snapgen image failed: HTTP ${res.status} ${JSON.stringify(data).slice(0, 300)}`
+      localizeSnapgenError(
+        typeof data.message === 'string' ? data.message : JSON.stringify(data).slice(0, 280),
+        data.error_code,
+        'image'
+      )
     );
   }
   if (!data.uuid) {
-    throw new Error(`Snapgen image response missing uuid: ${JSON.stringify(data).slice(0, 300)}`);
+    throw new Error(`Snapgen image thiếu uuid: ${JSON.stringify(data).slice(0, 300)}`);
   }
   return data;
 }
@@ -206,13 +302,15 @@ export async function extendVideo(params: ExtendVideoParams): Promise<SnapgenHis
   const data = (await res.json()) as SnapgenHistory & { detail?: unknown; message?: string };
   if (!res.ok) {
     throw new Error(
-      typeof data.message === 'string'
-        ? data.message
-        : `Snapgen extend ${params.family} failed: HTTP ${res.status} ${JSON.stringify(data).slice(0, 300)}`
+      localizeSnapgenError(
+        typeof data.message === 'string' ? data.message : JSON.stringify(data).slice(0, 280),
+        data.error_code,
+        'video'
+      )
     );
   }
   if (!data.uuid) {
-    throw new Error(`Snapgen extend missing uuid: ${JSON.stringify(data).slice(0, 300)}`);
+    throw new Error(`Snapgen extend thiếu uuid: ${JSON.stringify(data).slice(0, 300)}`);
   }
   return data;
 }
@@ -223,9 +321,15 @@ export async function getHistory(apiKey: string, uuid: string): Promise<SnapgenH
   });
   const data = (await res.json()) as SnapgenHistory;
   if (!res.ok) {
-    throw new Error(`History poll failed: HTTP ${res.status}`);
+    throw new Error(`Không lấy được lịch sử Snapgen: HTTP ${res.status}`);
   }
   return data;
+}
+
+function extractErrorCode(message?: string | null, explicit?: string | null): string | undefined {
+  if (explicit?.trim()) return explicit.trim();
+  const m = message?.match(/Error code:\s*([A-Z0-9_]+)/i);
+  return m?.[1];
 }
 
 function extractMediaUrl(hist: SnapgenHistory, kind: 'video' | 'image'): string | null {
@@ -259,21 +363,35 @@ export async function waitForMedia(
       if (!url) {
         throw new Error(
           kind === 'video'
-            ? 'Video completed but no video_url in history.'
-            : 'Image completed but no image_url in history.'
+            ? 'Video đã xong nhưng thiếu video_url trong lịch sử Snapgen.'
+            : 'Ảnh đã xong nhưng thiếu image_url trong lịch sử Snapgen.'
         );
       }
       return hist;
     }
     if (hist.status === 3) {
-      throw new Error(hist.error_message || `${kind} generation failed.`);
+      throw new Error(
+        localizeSnapgenError(
+          hist.error_message,
+          extractErrorCode(hist.error_message, hist.error_code),
+          kind
+        )
+      );
     }
 
     await sleep(delay);
     delay = Math.min(delay + 2000, 15000);
   }
 
-  throw new Error(`Timed out waiting for Snapgen ${kind}.`);
+  throw new Error(
+    localizeSnapgenError(
+      kind === 'image'
+        ? 'Timed out waiting for Snapgen image.'
+        : 'Timed out waiting for Snapgen video.',
+      'TIMEOUT',
+      kind
+    )
+  );
 }
 
 export async function waitForVideo(
@@ -291,7 +409,7 @@ export function getImageUrl(hist: SnapgenHistory): string | null {
 
 export async function downloadFile(url: string, destPath: string): Promise<string> {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`Tải file thất bại: HTTP ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
   fs.mkdirSync(path.dirname(destPath), { recursive: true });
   fs.writeFileSync(destPath, buf);

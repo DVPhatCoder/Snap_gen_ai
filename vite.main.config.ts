@@ -9,7 +9,15 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      external: ['ffmpeg-static', 'fluent-ffmpeg', 'electron'],
+      external: [
+        'ffmpeg-static',
+        'ffprobe-static',
+        'fluent-ffmpeg',
+        'electron',
+        'sharp',
+        '@pilio/gemini-watermark-remover',
+        '@pilio/gemini-watermark-remover/node',
+      ],
       output: {
         entryFileNames: 'main.js',
       },

@@ -1,7 +1,8 @@
 import type { GenerateJobResult } from '../../shared/types';
+import { toLocalMediaUrl } from '../../shared/media-url';
 
 export default function VideoPreview({ result }: { result: GenerateJobResult }) {
-  const fileUrl = `file:///${result.videoPath.replace(/\\/g, '/')}`;
+  const fileUrl = toLocalMediaUrl(result.videoPath);
 
   return (
     <div>

@@ -10,6 +10,7 @@ import type {
   ExportMediaResult,
   GenerateIdeaInput,
   GenerateJobInput,
+  LoadMoreUsageHistoryRequest,
   ProjectDraft,
 } from '../shared/types';
 import { getKeys, getSettings, saveKeys, saveSettings } from './store';
@@ -26,7 +27,13 @@ import {
   saveElevenLabsApiKeyManually,
   testElevenLabsSession,
 } from './services/elevenlabs-auth';
-import { listElevenLabsVoices } from './services/elevenlabs-tts';
+import { listElevenLabsVoices, previewElevenLabsVoice } from './services/elevenlabs-tts';
+import { getUsageSnapshot, getUsageHistory, loadMoreUsageHistory } from './services/usage';
+import {
+  installLocalMediaProtocol,
+  registerLocalMediaScheme,
+} from './services/local-media';
+import { beginJob, endJob, isJobActive } from './job-state';
 import {
   createProject,
   deleteProject,
@@ -36,11 +43,13 @@ import {
   saveProjectDraft,
 } from './services/projects';
 
+// Required before app ready so renderer can load project images/videos.
+registerLocalMediaScheme();
+
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
 
 let mainWindow: BrowserWindow | null = null;
-let jobRunning = false;
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -95,6 +104,11 @@ function registerIpc(): void {
   ipcMain.handle(IPC.testSnapgen, async () => testAccount(getKeys().snapgenApiKey));
   ipcMain.handle(IPC.testOpenAI, async () => testOpenAI(getKeys().openaiApiKey));
   ipcMain.handle(IPC.testElevenLabs, async () => testElevenLabsSession());
+  ipcMain.handle(IPC.getUsageQuotas, async () => getUsageSnapshot());
+  ipcMain.handle(IPC.getUsageHistory, async () => getUsageHistory());
+  ipcMain.handle(IPC.loadMoreUsageHistory, async (_e, request: LoadMoreUsageHistoryRequest) =>
+    loadMoreUsageHistory(request)
+  );
   ipcMain.handle(IPC.elevenLabsOpenLogin, async () => openElevenLabsLogin(mainWindow));
   ipcMain.handle(IPC.elevenLabsOpenApiKeys, async () => openElevenLabsApiKeysPage(mainWindow));
   ipcMain.handle(IPC.elevenLabsSaveApiKey, async (_e, apiKey: string) =>
@@ -110,6 +124,11 @@ function registerIpc(): void {
     });
     return listVoicesInFlight;
   });
+  ipcMain.handle(
+    IPC.elevenLabsPreviewVoice,
+    async (_e, input: { voiceId: string; modelId?: string; language?: string }) =>
+      previewElevenLabsVoice(input)
+  );
 
   onElevenLabsSessionChange((status) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -127,22 +146,22 @@ function registerIpc(): void {
   });
 
   ipcMain.handle(IPC.startGenerate, async (_e, input: GenerateJobInput) => {
-    if (jobRunning) throw new Error('Đang có job chạy. Đợi hoàn tất.');
-    jobRunning = true;
+    if (isJobActive()) throw new Error('Đang có job chạy. Đợi hoàn tất.');
+    beginJob();
     try {
       return await runGenerateJob(input);
     } finally {
-      jobRunning = false;
+      endJob();
     }
   });
 
   ipcMain.handle(IPC.remuxProject, async (_e, projectId: string) => {
-    if (jobRunning) throw new Error('Đang có job chạy. Đợi hoàn tất.');
-    jobRunning = true;
+    if (isJobActive()) throw new Error('Đang có job chạy. Đợi hoàn tất.');
+    beginJob();
     try {
       return await remuxProject(projectId);
     } finally {
-      jobRunning = false;
+      endJob();
     }
   });
 
@@ -243,6 +262,7 @@ async function exportFinalFile(
 }
 
 app.whenReady().then(() => {
+  installLocalMediaProtocol();
   installElevenLabsApiKeyCapture();
   registerIpc();
   createWindow();

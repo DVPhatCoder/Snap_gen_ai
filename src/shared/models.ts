@@ -10,15 +10,28 @@ export const VIDEO_FAMILIES: { id: VideoFamily; label: string }[] = [
 ];
 
 export const IMAGE_FAMILIES: { id: ImageFamily; label: string }[] = [
+  { id: 'snapgen-image', label: 'Snapgen Image' },
   { id: 'gpt-image', label: 'GPT Image' },
   { id: 'grok-image', label: 'Grok Image' },
-  { id: 'snapgen-image', label: 'Snapgen Image' },
 ];
+
+export const DEFAULT_VIDEO_FAMILY: VideoFamily = 'veo';
+export const DEFAULT_VIDEO_MODEL_ID = 'veo-3.1-fast';
+export const DEFAULT_IMAGE_FAMILY: ImageFamily = 'snapgen-image';
+export const DEFAULT_IMAGE_MODEL_ID = 'nano-banana-2';
+
+export function defaultFamilyForKind(kind: MediaKind): VideoFamily | ImageFamily {
+  return kind === 'image' ? DEFAULT_IMAGE_FAMILY : DEFAULT_VIDEO_FAMILY;
+}
+
+export function defaultModelIdForKind(kind: MediaKind): string {
+  return kind === 'image' ? DEFAULT_IMAGE_MODEL_ID : DEFAULT_VIDEO_MODEL_ID;
+}
 
 export const VIDEO_MODELS: ModelOption[] = [
   {
-    id: 'veo-3.1',
-    label: 'Veo 3.1',
+    id: 'veo-3.1-fast',
+    label: 'Veo 3.1 Fast',
     family: 'veo',
     kind: 'video',
     durations: [4, 6, 8],
@@ -29,8 +42,8 @@ export const VIDEO_MODELS: ModelOption[] = [
     defaultAspectRatio: '16:9',
   },
   {
-    id: 'veo-3.1-fast',
-    label: 'Veo 3.1 Fast',
+    id: 'veo-3.1',
+    label: 'Veo 3.1',
     family: 'veo',
     kind: 'video',
     durations: [4, 6, 8],
@@ -221,6 +234,42 @@ export const VIDEO_MODELS: ModelOption[] = [
 
 export const IMAGE_MODELS: ModelOption[] = [
   {
+    id: 'nano-banana-2',
+    label: 'Nano Banana 2',
+    family: 'snapgen-image',
+    kind: 'image',
+    durations: [4, 5, 6, 8, 10],
+    resolutions: ['1K', '2K'],
+    aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'],
+    defaultDuration: 5,
+    defaultResolution: '1K',
+    defaultAspectRatio: '16:9',
+  },
+  {
+    id: 'nano-banana-2-lite',
+    label: 'Nano Banana 2 Lite',
+    family: 'snapgen-image',
+    kind: 'image',
+    durations: [4, 5, 6, 8, 10],
+    resolutions: ['1K', '2K'],
+    aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'],
+    defaultDuration: 5,
+    defaultResolution: '1K',
+    defaultAspectRatio: '16:9',
+  },
+  {
+    id: 'nano-banana-pro',
+    label: 'Nano Banana Pro',
+    family: 'snapgen-image',
+    kind: 'image',
+    durations: [4, 5, 6, 8, 10],
+    resolutions: ['1K', '2K'],
+    aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'],
+    defaultDuration: 5,
+    defaultResolution: '1K',
+    defaultAspectRatio: '16:9',
+  },
+  {
     id: 'gpt-image-2',
     label: 'GPT Image 2',
     family: 'gpt-image',
@@ -246,33 +295,21 @@ export const IMAGE_MODELS: ModelOption[] = [
     defaultAspectRatio: 'landscape',
     extraFields: { mode: ['normal', 'fun', 'custom'] },
   },
-  {
-    id: 'imagen-4',
-    label: 'Imagen 4',
-    family: 'snapgen-image',
-    kind: 'image',
-    durations: [4, 5, 6, 8, 10],
-    resolutions: ['1K', '2K'],
-    aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'],
-    defaultDuration: 5,
-    defaultResolution: '1K',
-    defaultAspectRatio: '16:9',
-  },
-  {
-    id: 'flux-kontext-pro',
-    label: 'Flux Kontext Pro',
-    family: 'snapgen-image',
-    kind: 'image',
-    durations: [4, 5, 6, 8, 10],
-    resolutions: ['1K', '2K'],
-    aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'],
-    defaultDuration: 5,
-    defaultResolution: '1K',
-    defaultAspectRatio: '16:9',
-  },
 ];
 
 export const ALL_MODELS: ModelOption[] = [...VIDEO_MODELS, ...IMAGE_MODELS];
+
+/** Old Snapgen image model ids → current allowed ids. */
+const LEGACY_MODEL_ALIASES: Record<string, string> = {
+  'imagen-4': 'nano-banana-2',
+  'imagen-3': 'nano-banana-2',
+  'flux-kontext-pro': 'nano-banana-pro',
+  'flux-kontext': 'nano-banana-pro',
+};
+
+export function resolveModelId(modelId: string): string {
+  return LEGACY_MODEL_ALIASES[modelId] || modelId;
+}
 
 export function getFamilies(kind: MediaKind): { id: string; label: string }[] {
   return kind === 'image' ? IMAGE_FAMILIES : VIDEO_FAMILIES;

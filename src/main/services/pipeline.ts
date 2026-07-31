@@ -14,6 +14,7 @@ import type {
   VideoFamily,
 } from '../../shared/types';
 import { getKeys, getSettings } from '../store';
+import { resolveProjectVoice } from '../../shared/voice';
 import {
   downloadFile,
   extendVideo,
@@ -36,6 +37,8 @@ import {
   buildNarrationTrack,
   concatClipFiles,
   getDurationSafe,
+  isNanoBananaModel,
+  stripNanoBananaWatermark,
   type NarrationTrackItem,
 } from './ffmpeg';
 import {
@@ -281,6 +284,7 @@ export async function remuxProject(projectId: string): Promise<GenerateJobResult
   const settings = getSettings();
   const keys = getKeys();
   const mediaKind = draft.mediaKind || 'video';
+  const voice = resolveProjectVoice(draft, settings);
 
   emitProgress({ phase: 'merge', message: 'Đang ghép lại theo timeline đã chỉnh...', percent: 80 });
   updateProjectStatus(projectId, 'generating');
@@ -303,13 +307,13 @@ export async function remuxProject(projectId: string): Promise<GenerateJobResult
         workDir,
         script,
         apiKey: keys.openaiApiKey,
-        voice: settings.openaiTtsVoice,
-        ttsModel: settings.openaiTtsModel,
+        voice: voice.openaiTtsVoice,
+        ttsModel: voice.openaiTtsModel,
         language: draft.language,
         refresh: false,
-        ttsProvider: settings.ttsProvider,
-        elevenLabsVoiceId: settings.elevenLabsVoiceId,
-        elevenLabsModelId: settings.elevenLabsModelId,
+        ttsProvider: voice.ttsProvider,
+        elevenLabsVoiceId: voice.elevenLabsVoiceId,
+        elevenLabsModelId: voice.elevenLabsModelId,
       });
       audioPath = rebuilt.audioPath;
       srtPath = rebuilt.srtPath;
@@ -333,6 +337,7 @@ export async function remuxProject(projectId: string): Promise<GenerateJobResult
         burnSubtitles: settings.burnSubtitles,
         workDir,
         durations,
+        stripCornerLogo: isNanoBananaModel(draft.model || detail.meta.model || ''),
       });
     } else {
       await assembleFinalVideo({
@@ -375,12 +380,13 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
   const keys = getKeys();
   const settings = getSettings();
   const mediaKind = input.mediaKind || 'video';
+  const voice = resolveProjectVoice(input, settings);
 
   if (!keys.snapgenApiKey) throw new Error('Thiếu Snapgen API key. Vào Settings để cấu hình.');
-  if (settings.ttsProvider === 'openai' && !keys.openaiApiKey) {
+  if (voice.ttsProvider === 'openai' && !keys.openaiApiKey) {
     throw new Error('Thiếu OpenAI API key. Vào Settings để cấu hình.');
   }
-  if (settings.ttsProvider === 'elevenlabs') {
+  if (voice.ttsProvider === 'elevenlabs') {
     const el = await getElevenLabsSessionStatus();
     if (!el.loggedIn && !el.hasApiCredential) {
       throw new Error('Chưa có API key ElevenLabs. Vào Settings → dán API key free rồi Lưu.');
@@ -404,6 +410,18 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
     stylePrompt: input.stylePrompt,
   });
 
+  // Ghi voice theo dự án (GenerateJobInput ưu tiên).
+  {
+    const detail = getProject(meta.id);
+    if (detail.draft) {
+      saveProjectDraft(meta.id, {
+        ...detail.draft,
+        ...voice,
+        script: input.script,
+      });
+    }
+  }
+
   const projectDir = getProjectDir(meta.id);
   const clipsDir = path.join(projectDir, 'clips');
   const imagesDir = path.join(projectDir, 'images');
@@ -420,8 +438,7 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
 
   try {
     const refreshNarration = input.refreshNarration !== false;
-    const ttsLabel =
-      settings.ttsProvider === 'elevenlabs' ? 'ElevenLabs' : 'OpenAI TTS';
+    const ttsLabel = voice.ttsProvider === 'elevenlabs' ? 'ElevenLabs' : 'OpenAI TTS';
     emitProgress({
       phase: 'tts',
       message: refreshNarration
@@ -435,13 +452,13 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
       workDir,
       script: input.script,
       apiKey: keys.openaiApiKey,
-      voice: settings.openaiTtsVoice,
-      ttsModel: settings.openaiTtsModel,
+      voice: voice.openaiTtsVoice,
+      ttsModel: voice.openaiTtsModel,
       language: input.language,
       refresh: refreshNarration,
-      ttsProvider: settings.ttsProvider,
-      elevenLabsVoiceId: settings.elevenLabsVoiceId,
-      elevenLabsModelId: settings.elevenLabsModelId,
+      ttsProvider: voice.ttsProvider,
+      elevenLabsVoiceId: voice.elevenLabsVoiceId,
+      elevenLabsModelId: voice.elevenLabsModelId,
     });
     const audioPath = narration.audioPath;
     const srtPath = narration.srtPath;
@@ -452,7 +469,7 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
     emitProgress({
       phase: 'whisper',
       message:
-        settings.ttsProvider === 'elevenlabs'
+        voice.ttsProvider === 'elevenlabs'
           ? `Đã khớp lời thoại với ${script.scenes.length} scene theo timestamp ElevenLabs.`
           : `Đã khớp lời thoại với ${script.scenes.length} scene theo timestamp Whisper.`,
       percent: 12,
@@ -525,6 +542,9 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
 
         const imagePath = sceneMediaTarget(imagesDir, scene.id, 'png');
         await downloadFile(url, imagePath);
+        if (isNanoBananaModel(input.model)) {
+          await stripNanoBananaWatermark(imagePath);
+        }
         mediaPaths.push(imagePath);
       } else {
         // Each scene starts as a NEW video (hard cut between scenes).
@@ -664,6 +684,7 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
         burnSubtitles: input.burnSubtitles ?? settings.burnSubtitles,
         workDir,
         durations,
+        stripCornerLogo: isNanoBananaModel(input.model),
       });
     } else {
       await assembleFinalVideo({
@@ -692,7 +713,11 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    updateProjectStatus(meta.id, 'error', { lastError: message });
+    const stillHasVideo = fs.existsSync(path.join(projectDir, 'final.mp4'));
+    updateProjectStatus(meta.id, stillHasVideo ? 'ready' : 'error', {
+      hasVideo: stillHasVideo,
+      lastError: stillHasVideo ? '' : message,
+    });
     throw err;
   }
 }

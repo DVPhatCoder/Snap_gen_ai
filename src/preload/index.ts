@@ -19,6 +19,10 @@ import type {
   ProjectDraft,
   ProjectMeta,
   ScriptDraft,
+  LoadMoreUsageHistoryRequest,
+  LoadMoreUsageHistoryResult,
+  UsageHistorySnapshot,
+  UsageSnapshot,
   VideoFamily,
 } from '../shared/types';
 
@@ -39,6 +43,11 @@ const api = {
   testSnapgen: (): Promise<ConnectionTestResult> => ipcRenderer.invoke(IPC.testSnapgen),
   testOpenAI: (): Promise<ConnectionTestResult> => ipcRenderer.invoke(IPC.testOpenAI),
   testElevenLabs: (): Promise<ConnectionTestResult> => ipcRenderer.invoke(IPC.testElevenLabs),
+  getUsageQuotas: (): Promise<UsageSnapshot> => ipcRenderer.invoke(IPC.getUsageQuotas),
+  getUsageHistory: (): Promise<UsageHistorySnapshot> => ipcRenderer.invoke(IPC.getUsageHistory),
+  loadMoreUsageHistory: (
+    request: LoadMoreUsageHistoryRequest
+  ): Promise<LoadMoreUsageHistoryResult> => ipcRenderer.invoke(IPC.loadMoreUsageHistory, request),
   openElevenLabsLogin: (): Promise<ElevenLabsSessionStatus> =>
     ipcRenderer.invoke(IPC.elevenLabsOpenLogin),
   openElevenLabsApiKeys: (): Promise<ElevenLabsSessionStatus> =>
@@ -51,6 +60,11 @@ const api = {
     ipcRenderer.invoke(IPC.elevenLabsClearSession),
   listElevenLabsVoices: (): Promise<ElevenLabsVoice[]> =>
     ipcRenderer.invoke(IPC.elevenLabsListVoices),
+  previewElevenLabsVoice: (input: {
+    voiceId: string;
+    modelId?: string;
+    language?: string;
+  }): Promise<{ dataUrl: string }> => ipcRenderer.invoke(IPC.elevenLabsPreviewVoice, input),
   onElevenLabsSessionChange: (cb: (status: ElevenLabsSessionStatus) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, status: ElevenLabsSessionStatus) => cb(status);
     ipcRenderer.on(IPC.elevenLabsSessionChanged, listener);

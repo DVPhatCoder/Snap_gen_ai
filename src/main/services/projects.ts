@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { getProjectsRoot } from '../store';
+import { getProjectsRoot, getSettings } from '../store';
+import { isJobActive } from '../job-state';
 import {
   mediaExtFor,
   resolveSceneMedia,
@@ -18,7 +19,8 @@ import type {
   VideoFamily,
   ImageFamily,
 } from '../../shared/types';
-import { DEFAULT_DURATION_PER_SCENE } from '../../shared/models';
+import { DEFAULT_DURATION_PER_SCENE, defaultFamilyForKind, defaultModelIdForKind, getModelById } from '../../shared/models';
+import { resolveProjectVoice, projectDraftHasVoice } from '../../shared/voice';
 
 const META_FILE = 'meta.json';
 const DRAFT_FILE = 'draft.json';
@@ -92,20 +94,29 @@ function readDraft(id: string): ProjectDraft | null {
   try {
     const raw = JSON.parse(fs.readFileSync(p, 'utf8')) as Partial<ProjectDraft>;
     const sceneCount = raw.sceneCount ?? 3;
-    return {
+    const mediaKind = raw.mediaKind ?? 'video';
+    const voice = resolveProjectVoice(raw, getSettings());
+    const draft: ProjectDraft = {
       brief: raw.brief ?? '',
       language: raw.language ?? 'Tiếng Việt',
       sceneCount,
       targetDurationSec: resolveTargetDurationSec(raw, sceneCount),
-      family: raw.family ?? 'veo',
-      model: raw.model ?? 'veo-3.1',
+      family: raw.family ?? defaultFamilyForKind(mediaKind),
+      model: raw.model ?? defaultModelIdForKind(mediaKind),
       aspectRatio: raw.aspectRatio ?? '16:9',
-      resolution: raw.resolution ?? '720p',
+      resolution:
+        raw.resolution ?? getModelById(defaultModelIdForKind(mediaKind))?.defaultResolution ?? '720p',
       mode: raw.mode,
       script: raw.script ?? null,
-      mediaKind: raw.mediaKind ?? 'video',
+      mediaKind,
       stylePrompt: raw.stylePrompt ?? '',
+      ...voice,
     };
+    // Dự án cũ chưa có voice → snapshot vào draft một lần, khóa theo dự án.
+    if (!projectDraftHasVoice(raw)) {
+      writeDraft(id, draft);
+    }
+    return draft;
   } catch {
     return null;
   }
@@ -143,6 +154,20 @@ export function listProjects(): ProjectMeta[] {
       writeMeta(meta);
     } else {
       meta.hasVideo = fs.existsSync(path.join(root, entry.name, 'final.mp4'));
+      // Heal stale "Đang gen" left behind when a job crashed / app restarted.
+      if (meta.status === 'generating' && !isJobActive()) {
+        if (meta.hasVideo) {
+          meta.status = 'ready';
+          meta.lastError = '';
+          meta.updatedAt = nowIso();
+          writeMeta(meta);
+        } else {
+          meta.status = 'error';
+          meta.lastError = meta.lastError || 'Job bị gián đoạn trước khi tạo xong video.';
+          meta.updatedAt = nowIso();
+          writeMeta(meta);
+        }
+      }
     }
     items.push(meta);
   }
@@ -196,6 +221,7 @@ export function createProject(input: CreateProjectInput): ProjectMeta {
   const id = uniqueId(name);
   const ts = nowIso();
   const mediaKind: MediaKind = input.mediaKind ?? 'video';
+  const defaultModel = getModelById(defaultModelIdForKind(mediaKind));
   const meta: ProjectMeta = {
     id,
     name,
@@ -204,10 +230,10 @@ export function createProject(input: CreateProjectInput): ProjectMeta {
     status: 'draft',
     brief: input.brief ?? '',
     language: input.language ?? 'Tiếng Việt',
-    family: input.family ?? (mediaKind === 'image' ? 'gpt-image' : 'veo'),
-    model: input.model ?? (mediaKind === 'image' ? 'gpt-image-2' : 'veo-3.1'),
-    aspectRatio: input.aspectRatio ?? '16:9',
-    resolution: input.resolution ?? (mediaKind === 'image' ? '2k' : '720p'),
+    family: input.family ?? defaultFamilyForKind(mediaKind),
+    model: input.model ?? defaultModelIdForKind(mediaKind),
+    aspectRatio: input.aspectRatio ?? defaultModel?.defaultAspectRatio ?? '16:9',
+    resolution: input.resolution ?? defaultModel?.defaultResolution ?? (mediaKind === 'image' ? '1K' : '720p'),
     mode: input.mode,
     sceneCount: input.sceneCount ?? 3,
     targetDurationSec:
@@ -219,19 +245,21 @@ export function createProject(input: CreateProjectInput): ProjectMeta {
   };
 
   writeMeta(meta);
+  const voice = resolveProjectVoice(input, getSettings());
   writeDraft(id, {
     brief: meta.brief ?? '',
     language: meta.language ?? 'Tiếng Việt',
     sceneCount: meta.sceneCount ?? 3,
     targetDurationSec: meta.targetDurationSec ?? DEFAULT_TARGET_DURATION_SEC,
-    family: (meta.family ?? 'veo') as VideoFamily | ImageFamily,
-    model: meta.model ?? 'veo-3.1',
+    family: (meta.family ?? defaultFamilyForKind(mediaKind)) as VideoFamily | ImageFamily,
+    model: meta.model ?? defaultModelIdForKind(mediaKind),
     aspectRatio: meta.aspectRatio ?? '16:9',
-    resolution: meta.resolution ?? '720p',
+    resolution: meta.resolution ?? (mediaKind === 'image' ? '1K' : '720p'),
     mode: meta.mode,
     script: null,
     mediaKind,
     stylePrompt: meta.stylePrompt ?? '',
+    ...voice,
   });
 
   return meta;
@@ -322,6 +350,8 @@ export function ensureProject(options: {
       existing.mediaKind = options.mediaKind ?? existing.mediaKind ?? 'video';
       existing.stylePrompt = options.stylePrompt ?? existing.stylePrompt ?? '';
       writeMeta(existing);
+      const prevDraft = readDraft(options.projectId);
+      const voice = resolveProjectVoice(prevDraft, getSettings());
       writeDraft(options.projectId, {
         brief: existing.brief ?? '',
         language: existing.language ?? 'Tiếng Việt',
@@ -336,6 +366,7 @@ export function ensureProject(options: {
         script: options.script,
         mediaKind: existing.mediaKind ?? 'video',
         stylePrompt: existing.stylePrompt ?? '',
+        ...voice,
       });
       return existing;
     }
@@ -369,6 +400,7 @@ export function ensureProject(options: {
   created.status = 'generating';
   created.updatedAt = nowIso();
   writeMeta(created);
+  const voice = resolveProjectVoice(readDraft(created.id), getSettings());
   writeDraft(created.id, {
     brief: options.brief ?? '',
     language: options.language ?? 'Tiếng Việt',
@@ -382,6 +414,7 @@ export function ensureProject(options: {
     script: options.script,
     mediaKind: options.mediaKind ?? 'video',
     stylePrompt: options.stylePrompt ?? '',
+    ...voice,
   });
   return created;
 }

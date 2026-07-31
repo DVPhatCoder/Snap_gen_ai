@@ -3,9 +3,12 @@ import type {
   ApiKeys,
   AppSettings,
   ElevenLabsSessionStatus,
-  ElevenLabsVoice,
+  UsageHistorySnapshot,
+  UsageSnapshot,
 } from '../../shared/types';
 import { ELEVENLABS_TTS_MODELS, OPENAI_TTS_MODELS, OPENAI_TTS_VOICES } from '../../shared/types';
+import UsageQuotaPanel from '../components/UsageQuotaPanel';
+import UsageHistoryPanel from '../components/UsageHistoryPanel';
 
 export default function Settings() {
   const [keys, setKeys] = useState<ApiKeys>({
@@ -26,18 +29,56 @@ export default function Settings() {
     cookieCount: 0,
   });
   const [elevenLabsApiKeyInput, setElevenLabsApiKeyInput] = useState('');
-  const [voices, setVoices] = useState<ElevenLabsVoice[]>([]);
   const [voicesLoaded, setVoicesLoaded] = useState(false);
+  const [usage, setUsage] = useState<UsageSnapshot | null>(null);
+  const [usageBusy, setUsageBusy] = useState(false);
+  const [usageError, setUsageError] = useState<string | null>(null);
+  const [history, setHistory] = useState<UsageHistorySnapshot | null>(null);
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const elevenLabsReady = elevenLabs.loggedIn || !!elevenLabs.hasApiCredential;
 
+  const refreshUsage = async () => {
+    setUsageBusy(true);
+    try {
+      setUsage(await window.studio.getUsageQuotas());
+      setUsageError(null);
+    } catch (err) {
+      const text = err instanceof Error ? err.message : String(err);
+      setUsageError(
+        text.includes('No handler') || text.includes('usage:getQuotas')
+          ? 'Main chưa reload — gõ rs trong terminal Forge rồi bấm Làm mới.'
+          : text
+      );
+    } finally {
+      setUsageBusy(false);
+    }
+  };
+
+  const refreshHistory = async () => {
+    setHistoryBusy(true);
+    try {
+      setHistory(await window.studio.getUsageHistory());
+      setHistoryError(null);
+    } catch (err) {
+      const text = err instanceof Error ? err.message : String(err);
+      setHistoryError(
+        text.includes('No handler') || text.includes('usage:getHistory')
+          ? 'Main chưa reload — gõ rs trong terminal Forge rồi bấm Làm mới.'
+          : text
+      );
+    } finally {
+      setHistoryBusy(false);
+    }
+  };
+
   const loadVoices = async (force = false) => {
     if (!force && voicesLoaded) return;
     try {
       const list = await window.studio.listElevenLabsVoices();
-      setVoices(list);
       setVoicesLoaded(true);
       setSettings((prev) => {
         if (list.length && !list.some((v) => v.voiceId === prev.elevenLabsVoiceId)) {
@@ -45,9 +86,10 @@ export default function Settings() {
         }
         return prev;
       });
-    } catch {
-      setVoices([]);
+      setMsg({ type: 'ok', text: `Đã tải ${list.length} giọng ElevenLabs (chọn trong dự án → Giọng đọc).` });
+    } catch (err) {
       setVoicesLoaded(false);
+      setMsg({ type: 'error', text: err instanceof Error ? err.message : String(err) });
     }
   };
 
@@ -61,6 +103,8 @@ export default function Settings() {
       if (session.loggedIn && session.hasApiCredential) {
         await loadVoices(true);
       }
+      await refreshUsage();
+      await refreshHistory();
     })();
     return window.studio.onElevenLabsSessionChange((status) => {
       setElevenLabs((prev) => {
@@ -72,7 +116,6 @@ export default function Settings() {
         return same ? prev : status;
       });
       if (!status.loggedIn) {
-        setVoices([]);
         setVoicesLoaded(false);
       }
       // Do NOT auto-spam listVoices on every session sync event.
@@ -149,7 +192,7 @@ export default function Settings() {
     try {
       const status = await window.studio.clearElevenLabsSession();
       setElevenLabs(status);
-      setVoices([]);
+      setVoicesLoaded(false);
       setElevenLabsApiKeyInput('');
       if (settings.ttsProvider === 'elevenlabs') {
         setSettings((prev) => ({ ...prev, ttsProvider: 'openai' }));
@@ -205,9 +248,24 @@ export default function Settings() {
         <p className="eyebrow">Cấu hình</p>
         <h1>API &amp; Voice</h1>
         <p className="sub">
-          Chọn nguồn giọng đọc: OpenAI TTS hoặc ElevenLabs (API key free — dán một lần là dùng được).
+          Chọn nguồn giọng đọc và theo dõi số dư Snapgen / ElevenLabs ngay bên dưới.
         </p>
       </div>
+
+      <UsageQuotaPanel
+        snapshot={usage}
+        busy={usageBusy || busy}
+        error={usageError}
+        onRefresh={() => void refreshUsage()}
+      />
+
+      <UsageHistoryPanel
+        snapshot={history}
+        busy={historyBusy || busy}
+        error={historyError}
+        onRefresh={() => void refreshHistory()}
+        onSnapshotChange={setHistory}
+      />
 
       <section className="settings-block">
         <h2>API Keys</h2>
@@ -335,9 +393,13 @@ export default function Settings() {
       </section>
 
       <section className="settings-block">
-        <h2>Voiceover</h2>
+        <h2>Voiceover (mặc định dự án mới)</h2>
+        <p className="settings-note">
+          Chọn giọng trong từng dự án: Studio → tab <strong>Giọng đọc</strong> (hoặc khối
+          «Giọng đọc theo dự án» trong AI Create). Phần dưới chỉ là mặc định khi tạo dự án mới.
+        </p>
         <div className="field">
-          <label htmlFor="tts-provider">Nguồn giọng đọc</label>
+          <label htmlFor="tts-provider">Nguồn giọng mặc định</label>
           <select
             id="tts-provider"
             value={settings.ttsProvider}
@@ -354,97 +416,54 @@ export default function Settings() {
             </option>
           </select>
         </div>
-
         {settings.ttsProvider === 'elevenlabs' ? (
-          <>
-            <div className="grid-2">
-              <div className="field">
-                <label htmlFor="el-voice">ElevenLabs voice</label>
-                <select
-                  id="el-voice"
-                  value={settings.elevenLabsVoiceId}
-                  onChange={(e) =>
-                    setSettings({ ...settings, elevenLabsVoiceId: e.target.value })
-                  }
-                >
-                  {voices.length === 0 && (
-                    <option value={settings.elevenLabsVoiceId}>
-                      {settings.elevenLabsVoiceId || 'Chưa tải voice'}
-                    </option>
-                  )}
-                  {voices.map((voice) => {
-                    const accent =
-                      voice.labels?.language ||
-                      voice.labels?.accent ||
-                      voice.labels?.locale ||
-                      '';
-                    return (
-                      <option key={voice.voiceId} value={voice.voiceId}>
-                        {voice.name}
-                        {accent ? ` · ${accent}` : ''}
-                        {voice.category ? ` · ${voice.category}` : ''}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="el-model">ElevenLabs model</label>
-                <select
-                  id="el-model"
-                  value={settings.elevenLabsModelId}
-                  onChange={(e) =>
-                    setSettings({ ...settings, elevenLabsModelId: e.target.value })
-                  }
-                >
-                  {ELEVENLABS_TTS_MODELS.map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <p className="hint">
-              Tiếng Việt: chọn model <code>eleven_flash_v2_5</code> / <code>eleven_turbo_v2_5</code>{' '}
-              / <code>eleven_v3</code> (app tự đổi nếu bạn để multilingual_v2). Giọng premade Adam/Rachel
-              là giọng Anh — nên tìm voice có label Vietnamese trong Voice Library, hoặc clone giọng
-              Việt. Generate lại sau khi đổi model/voice.
-            </p>
-          </>
+          <div className="field">
+            <label htmlFor="el-model-default">ElevenLabs model mặc định</label>
+            <select
+              id="el-model-default"
+              value={settings.elevenLabsModelId}
+              onChange={(e) =>
+                setSettings({ ...settings, elevenLabsModelId: e.target.value })
+              }
+            >
+              {ELEVENLABS_TTS_MODELS.map((model) => (
+                <option key={model} value={model}>
+                  {model}
+                </option>
+              ))}
+            </select>
+          </div>
         ) : (
-          <>
-            <div className="grid-2">
-              <div className="field">
-                <label htmlFor="tts-model">OpenAI TTS model</label>
-                <select
-                  id="tts-model"
-                  value={settings.openaiTtsModel}
-                  onChange={(e) => setSettings({ ...settings, openaiTtsModel: e.target.value })}
-                >
-                  {OPENAI_TTS_MODELS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="tts-voice">OpenAI TTS voice</label>
-                <select
-                  id="tts-voice"
-                  value={settings.openaiTtsVoice}
-                  onChange={(e) => setSettings({ ...settings, openaiTtsVoice: e.target.value })}
-                >
-                  {OPENAI_TTS_VOICES.map((v) => (
-                    <option key={v} value={v}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
-              </div>
+          <div className="grid-2">
+            <div className="field">
+              <label htmlFor="tts-model">OpenAI TTS model mặc định</label>
+              <select
+                id="tts-model"
+                value={settings.openaiTtsModel}
+                onChange={(e) => setSettings({ ...settings, openaiTtsModel: e.target.value })}
+              >
+                {OPENAI_TTS_MODELS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
             </div>
-          </>
+            <div className="field">
+              <label htmlFor="tts-voice">OpenAI TTS voice mặc định</label>
+              <select
+                id="tts-voice"
+                value={settings.openaiTtsVoice}
+                onChange={(e) => setSettings({ ...settings, openaiTtsVoice: e.target.value })}
+              >
+                {OPENAI_TTS_VOICES.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
         )}
 
         <div className="field">
