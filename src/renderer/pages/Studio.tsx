@@ -14,6 +14,7 @@ import type {
 import {
   defaultFamilyForKind,
   defaultModelIdForKind,
+  estimateScriptSpokenSeconds,
   formatDurationLabel,
   getModelById,
   maxSingleShotDuration,
@@ -30,7 +31,7 @@ import ProjectVoicePanel from '../components/ProjectVoicePanel';
 import type { ProjectVoiceSettings } from '../../shared/types';
 import { DEFAULT_PROJECT_VOICE, resolveProjectVoice } from '../../shared/voice';
 
-const DURATION_PRESETS_MIN = [0.5, 1, 2, 3, 5] as const;
+const DURATION_PRESETS_MIN = [0.5, 1, 2, 3, 5, 10, 15] as const;
 const DEFAULT_DURATION_MIN = 1;
 
 function minutesFromSeconds(totalSec: unknown, fallback = DEFAULT_DURATION_MIN): number {
@@ -815,6 +816,11 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
       await window.studio.saveProjectDraft(id, draftPayload(draft), {
         name: projectName.trim() || 'Untitled project',
       });
+      const spoken = estimateScriptSpokenSeconds(draft.scenes);
+      setToast({
+        type: 'ok',
+        text: `Script sẵn sàng: ${draft.scenes.length} scene · lời thoại ~${formatDurationLabel(spoken)} (mục tiêu ${formatDurationLabel(scenePlan.targetDurationSec)}).`,
+      });
       setActiveTool('script');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -827,6 +833,15 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
     if (!script) {
       setActiveTool('ai');
       setError('Hãy tạo kịch bản trước khi generate.');
+      return;
+    }
+    const spoken = estimateScriptSpokenSeconds(script.scenes);
+    const target = scenePlan.targetDurationSec;
+    if (spoken < target * 0.85) {
+      setActiveTool('ai');
+      setError(
+        `Narration chỉ ~${formatDurationLabel(spoken)}, ngắn hơn mục tiêu ${formatDurationLabel(target)}. Hãy Generate script lại trước khi tạo video.`
+      );
       return;
     }
     setGenerateOpen(true);
@@ -953,7 +968,8 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
             <div className="duration-field-head">
               <label htmlFor="target-duration">Thời lượng video</label>
               <span className="duration-field-live">
-                {formatDurationLabel(scenePlan.targetDurationSec)} · ≈{scenePlan.sceneCountHint} scene
+                {formatDurationLabel(scenePlan.targetDurationSec)} · {scenePlan.sceneCountHint}{' '}
+                scene · ~{scenePlan.secondsPerScene}s/scene
               </span>
             </div>
             <div className="duration-presets" role="group" aria-label="Preset thời lượng">
@@ -987,7 +1003,8 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
                 <span className="duration-unit">phút</span>
               </div>
               <p id="duration-hint" className="hint duration-hint">
-                Scene tự chia theo nội dung
+                Số scene = thời lượng ÷ ~{scenePlan.typicalBeatSec}s/scene. Narration phải đủ dài
+                khớp mục tiêu trước khi tạo voice.
                 {mediaKind === 'video' ? ` · >${maxShotSec}s dùng Extend` : ''}.
                 {scenePlan.sceneCountHint > 12 ? ' Chi phí tăng khi nhiều scene.' : ''}
               </p>
