@@ -208,7 +208,12 @@ export interface JobProgress {
   message: string;
   sceneIndex?: number;
   sceneTotal?: number;
+  /** Overall job progress 0–100 (progress bar). */
   percent?: number;
+  /** Snapgen render progress for the current shot 0–100. */
+  detailPercent?: number;
+  chunkIndex?: number;
+  chunkTotal?: number;
   error?: string;
 }
 

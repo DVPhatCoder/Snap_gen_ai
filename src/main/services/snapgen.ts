@@ -248,7 +248,11 @@ export async function waitForMedia(
 
   while (Date.now() - started < timeoutMs) {
     const hist = await getHistory(apiKey, uuid);
-    onProgress?.(hist.status_percentage ?? 0, hist.status);
+    let pct = hist.status_percentage ?? 0;
+    // Some Snapgen responses use 0–1 instead of 0–100.
+    if (pct > 0 && pct <= 1) pct = Math.round(pct * 100);
+    else pct = Math.min(100, Math.max(0, Math.round(pct)));
+    onProgress?.(pct, hist.status);
 
     if (hist.status === 2) {
       const url = extractMediaUrl(hist, kind);

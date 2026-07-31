@@ -75,6 +75,38 @@ function emit(progress: JobProgress): void {
   }
 }
 
+/** Keep overall % monotonic within one job so the bar never jumps backward. */
+let lastOverallPercent = 0;
+
+function resetJobProgress(): void {
+  lastOverallPercent = 0;
+}
+
+function emitProgress(progress: JobProgress): void {
+  const raw = progress.percent ?? lastOverallPercent;
+  const percent = Math.min(100, Math.max(lastOverallPercent, Math.round(raw)));
+  lastOverallPercent = percent;
+  emit({ ...progress, percent });
+}
+
+/** Snapgen sometimes returns 0–1; normalize to 0–100. */
+function normalizeSnapgenPercent(raw?: number): number {
+  if (raw == null || Number.isNaN(raw)) return 0;
+  if (raw > 0 && raw <= 1) return Math.round(raw * 100);
+  return Math.min(100, Math.max(0, Math.round(raw)));
+}
+
+/** Media generation spans 12% → 90% of the overall bar. */
+function mediaOverallPercent(
+  sceneIndex: number,
+  sceneTotal: number,
+  sceneLocal01: number
+): number {
+  const n = Math.max(sceneTotal, 1);
+  const local = Math.min(1, Math.max(0, sceneLocal01));
+  return 12 + Math.round(((sceneIndex + local) / n) * 78);
+}
+
 function collectSceneMedia(
   projectDir: string,
   script: ScriptDraft,
@@ -241,6 +273,8 @@ export async function remuxProject(projectId: string): Promise<GenerateJobResult
     throw new Error('Dự án chưa có kịch bản để ghép lại.');
   }
 
+  resetJobProgress();
+
   const projectDir = detail.projectDir;
   const workDir = path.join(projectDir, 'work');
   const outputPath = path.join(projectDir, 'final.mp4');
@@ -248,7 +282,7 @@ export async function remuxProject(projectId: string): Promise<GenerateJobResult
   const keys = getKeys();
   const mediaKind = draft.mediaKind || 'video';
 
-  emit({ phase: 'merge', message: 'Đang ghép lại theo timeline đã chỉnh...', percent: 80 });
+  emitProgress({ phase: 'merge', message: 'Đang ghép lại theo timeline đã chỉnh...', percent: 80 });
   updateProjectStatus(projectId, 'generating');
 
   try {
@@ -259,7 +293,7 @@ export async function remuxProject(projectId: string): Promise<GenerateJobResult
 
     const hasRawNarration = fs.existsSync(path.join(projectDir, RAW_NARRATION_FILE));
     if (hasRawNarration) {
-      emit({
+      emitProgress({
         phase: 'tts',
         message: 'Đang khớp lại voiceover liền mạch với từng scene...',
         percent: 82,
@@ -314,7 +348,7 @@ export async function remuxProject(projectId: string): Promise<GenerateJobResult
     }
 
     updateProjectStatus(projectId, 'ready', { hasVideo: true, lastError: '' });
-    emit({ phase: 'done', message: 'Đã áp dụng timeline!', percent: 100 });
+    emitProgress({ phase: 'done', message: 'Đã áp dụng timeline!', percent: 100 });
 
     return {
       projectId,
@@ -348,10 +382,12 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
   }
   if (settings.ttsProvider === 'elevenlabs') {
     const el = await getElevenLabsSessionStatus();
-    if (!el.loggedIn) {
-      throw new Error('Chưa đăng nhập ElevenLabs. Vào Settings → ElevenLabs để đăng nhập.');
+    if (!el.loggedIn && !el.hasApiCredential) {
+      throw new Error('Chưa có API key ElevenLabs. Vào Settings → dán API key free rồi Lưu.');
     }
   }
+
+  resetJobProgress();
 
   const meta = ensureProject({
     projectId: input.projectId || undefined,
@@ -386,7 +422,7 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
     const refreshNarration = input.refreshNarration !== false;
     const ttsLabel =
       settings.ttsProvider === 'elevenlabs' ? 'ElevenLabs' : 'OpenAI TTS';
-    emit({
+    emitProgress({
       phase: 'tts',
       message: refreshNarration
         ? `Đang đọc toàn bộ kịch bản thành một mạch voiceover (${ttsLabel})...`
@@ -413,7 +449,7 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
     const durations = narration.durations;
     persistScript(meta.id, script);
 
-    emit({
+    emitProgress({
       phase: 'whisper',
       message:
         settings.ttsProvider === 'elevenlabs'
@@ -441,23 +477,24 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
         Boolean(input.forceRegenerate) ||
         (selectedIds != null && selectedIds.has(scene.id));
       if (!forceThis && cachedPath) {
-        emit({
+        emitProgress({
           phase,
           message: `Dùng lại ${label} cảnh ${i + 1}/${scenes.length} đã tạo trước đó.`,
           sceneIndex: i,
           sceneTotal: scenes.length,
-          percent: 12 + Math.round(((i + 1) / Math.max(scenes.length, 1)) * 70),
+          percent: mediaOverallPercent(i, scenes.length, 1),
         });
         mediaPaths.push(cachedPath);
         continue;
       }
 
-      emit({
+      emitProgress({
         phase,
         message: `Đang tạo ${label} cảnh ${i + 1}/${scenes.length}...`,
         sceneIndex: i,
         sceneTotal: scenes.length,
-        percent: 12 + Math.round((i / Math.max(scenes.length, 1)) * 70),
+        detailPercent: 0,
+        percent: mediaOverallPercent(i, scenes.length, 0),
       });
 
       if (mediaKind === 'image') {
@@ -472,12 +509,14 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
         });
 
         const hist = await waitForMedia(keys.snapgenApiKey, job.uuid, 'image', (pct) => {
-          emit({
+          const shot = normalizeSnapgenPercent(pct);
+          emitProgress({
             phase: 'image',
-            message: `Ảnh ${i + 1}/${scenes.length}: ${pct}%`,
+            message: `Đang render ảnh cảnh ${i + 1}/${scenes.length}`,
             sceneIndex: i,
             sceneTotal: scenes.length,
-            percent: 12 + Math.round(((i + pct / 100) / Math.max(scenes.length, 1)) * 70),
+            detailPercent: shot,
+            percent: mediaOverallPercent(i, scenes.length, shot / 100),
           });
         });
 
@@ -506,21 +545,21 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
               ? `Continue the same shot seamlessly, no cut, natural motion continuation. ${prompt}`
               : `New beat of the same scene, hard cut ok, keep visual continuity. ${prompt}`;
 
-          emit({
+          const chunkBase = c / plan.chunks.length;
+          emitProgress({
             phase: 'video',
             message:
               plan.mode === 'extend' && !isFirst
-                ? `Cảnh ${i + 1}: extend đoạn ${c + 1}/${plan.chunks.length} (${chunkDur}s)...`
+                ? `Cảnh ${i + 1}/${scenes.length}: extend đoạn ${c + 1}/${plan.chunks.length} (${chunkDur}s)`
                 : plan.chunks.length > 1
-                  ? `Cảnh ${i + 1}: gen đoạn ${c + 1}/${plan.chunks.length} (${chunkDur}s)...`
-                  : `Đang tạo video cảnh ${i + 1}/${scenes.length} (${chunkDur}s)...`,
+                  ? `Cảnh ${i + 1}/${scenes.length}: gen đoạn ${c + 1}/${plan.chunks.length} (${chunkDur}s)`
+                  : `Đang tạo video cảnh ${i + 1}/${scenes.length} (${chunkDur}s)`,
             sceneIndex: i,
             sceneTotal: scenes.length,
-            percent:
-              12 +
-              Math.round(
-                ((i + (c + 0.5) / plan.chunks.length) / Math.max(scenes.length, 1)) * 70
-              ),
+            chunkIndex: c,
+            chunkTotal: plan.chunks.length,
+            detailPercent: 0,
+            percent: mediaOverallPercent(i, scenes.length, chunkBase),
           });
 
           let histUuid: string;
@@ -550,16 +589,20 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
           }
 
           const hist = await waitForMedia(keys.snapgenApiKey, histUuid, 'video', (pct) => {
-            emit({
+            const shot = normalizeSnapgenPercent(pct);
+            const withinScene = (c + shot / 100) / plan.chunks.length;
+            emitProgress({
               phase: 'video',
-              message: `Cảnh ${i + 1} đoạn ${c + 1}/${plan.chunks.length}: ${pct}%`,
+              message:
+                plan.chunks.length > 1
+                  ? `Cảnh ${i + 1}/${scenes.length} · đoạn ${c + 1}/${plan.chunks.length}`
+                  : `Đang render video cảnh ${i + 1}/${scenes.length}`,
               sceneIndex: i,
               sceneTotal: scenes.length,
-              percent:
-                12 +
-                Math.round(
-                  ((i + (c + pct / 100) / plan.chunks.length) / Math.max(scenes.length, 1)) * 70
-                ),
+              chunkIndex: c,
+              chunkTotal: plan.chunks.length,
+              detailPercent: shot,
+              percent: mediaOverallPercent(i, scenes.length, withinScene),
             });
           });
 
@@ -574,6 +617,14 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
         const clipPath = sceneMediaTarget(clipsDir, scene.id, 'mp4');
         await concatClipFiles(segmentPaths, clipPath, path.join(segmentDir, 'merge'));
         mediaPaths.push(clipPath);
+        emitProgress({
+          phase: 'video',
+          message: `Xong video cảnh ${i + 1}/${scenes.length}`,
+          sceneIndex: i,
+          sceneTotal: scenes.length,
+          detailPercent: 100,
+          percent: mediaOverallPercent(i, scenes.length, 1),
+        });
       }
     }
 
@@ -594,13 +645,13 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
       'utf8'
     );
 
-    emit({
+    emitProgress({
       phase: 'merge',
       message:
         mediaKind === 'image'
           ? 'Đang ghép slideshow ảnh + audio + subtitle...'
           : 'Đang cắt ghép các cảnh (hard cut) + audio + subtitle...',
-      percent: 88,
+      percent: 92,
     });
 
     const outputPath = path.join(projectDir, 'final.mp4');
@@ -628,7 +679,7 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
     }
 
     updateProjectStatus(meta.id, 'ready', { hasVideo: true, lastError: '' });
-    emit({ phase: 'done', message: 'Hoàn tất!', percent: 100 });
+    emitProgress({ phase: 'done', message: 'Hoàn tất!', percent: 100 });
 
     return {
       projectId: meta.id,

@@ -1236,8 +1236,26 @@ h2 {
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
 }
 
+.progress-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.progress-overall {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.progress-meta {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
 .bar {
-  height: 4px;
+  height: 6px;
   margin-top: 10px;
   overflow: hidden;
   border-radius: 4px;
@@ -1249,6 +1267,16 @@ h2 {
   height: 100%;
   background: linear-gradient(90deg, var(--purple), var(--accent));
   transition: width 0.25s ease;
+}
+
+.bar-detail {
+  height: 3px;
+  margin-top: 6px;
+  opacity: 0.85;
+}
+
+.bar-detail > span {
+  background: linear-gradient(90deg, #5b8def, #7ec8ff);
 }
 
 .status-dot {
