@@ -21,6 +21,8 @@ export const IPC = {
   startGenerate: 'job:start',
   remuxProject: 'job:remux',
   jobProgress: 'job:progress',
+  getActiveJob: 'job:getActive',
+  jobFinished: 'job:finished',
   openPath: 'shell:openPath',
   showItemInFolder: 'shell:showItem',
   exportVideo: 'job:export',

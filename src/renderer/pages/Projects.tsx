@@ -20,9 +20,19 @@ export default function Projects({ onOpenProject, onCreateAndOpen }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [liveJobId, setLiveJobId] = useState<string | null>(null);
+  const [livePercent, setLivePercent] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     setProjects(await window.studio.listProjects());
+    try {
+      const job = await window.studio.getActiveJob();
+      setLiveJobId(job.active ? job.projectId : null);
+      setLivePercent(job.active ? job.progress?.percent ?? 0 : null);
+    } catch {
+      setLiveJobId(null);
+      setLivePercent(null);
+    }
   }, []);
 
   useEffect(() => {
@@ -32,13 +42,24 @@ export default function Projects({ onOpenProject, onCreateAndOpen }: Props) {
   // While any project is "generating", keep the list fresh so badge flips to Hoàn tất.
   useEffect(() => {
     const hasGenerating = projects.some((p) => p.status === 'generating');
-    if (!hasGenerating) return;
+    if (!hasGenerating && !liveJobId) return;
     const timer = window.setInterval(() => {
       void refresh();
-    }, 2500);
+    }, 2000);
     return () => window.clearInterval(timer);
-  }, [projects, refresh]);
+  }, [projects, refresh, liveJobId]);
 
+  useEffect(() => {
+    return window.studio.onJobFinished(() => {
+      void refresh();
+    });
+  }, [refresh]);
+
+  useEffect(() => {
+    return window.studio.onJobProgress((p) => {
+      setLivePercent(p.percent ?? 0);
+    });
+  }, []);
   const create = async () => {
     if (!newName.trim()) {
       setError('Nhập tên dự án trước.');
@@ -140,7 +161,11 @@ export default function Projects({ onOpenProject, onCreateAndOpen }: Props) {
                   <div>
                     <strong>{p.name}</strong>
                     <div className="muted" style={{ marginTop: 4 }}>
-                      <span className={`badge badge-${p.status}`}>{STATUS_LABEL[p.status] ?? p.status}</span>
+                      <span className={`badge badge-${p.status}`}>
+                        {liveJobId === p.id && livePercent != null
+                          ? `Đang gen ${Math.round(livePercent)}%`
+                          : STATUS_LABEL[p.status] ?? p.status}
+                      </span>
                       {' · '}
                       {p.model ?? '—'}
                       {' · '}

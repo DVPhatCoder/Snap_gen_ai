@@ -5,8 +5,37 @@ import type { ElevenLabsVoice } from '../../shared/types';
 import type { TranscriptWord } from './openai-audio';
 import { elevenLabsFetch, getElevenLabsSessionStatus } from './elevenlabs-auth';
 
-const DEFAULT_VOICE_ID = '21m00Tcm4TlvDq8ikWAM'; // Rachel
-const DEFAULT_MODEL_ID = 'eleven_multilingual_v2';
+const DEFAULT_VOICE_ID = '21m00Tcm4TlvDq8ikWAM'; // Rachel (premade — Free API OK)
+
+export function isElevenLabsLibraryVoice(category?: string): boolean {
+  return (category || '').toLowerCase() === 'library';
+}
+
+/** Free/Starter API không TTS được Voice Library — ưu tiên premade. */
+export function pickApiSafeElevenLabsVoiceId(
+  voices: ElevenLabsVoice[],
+  requestedId?: string
+): string {
+  const requested = (requestedId || '').trim();
+  if (requested) {
+    const hit = voices.find((v) => v.voiceId === requested);
+    if (hit && !isElevenLabsLibraryVoice(hit.category)) return hit.voiceId;
+    // Id không có trong list (hoặc là library) → không dùng.
+  }
+  const premade = voices.find((v) => (v.category || '').toLowerCase() === 'premade');
+  if (premade) return premade.voiceId;
+  const owned = voices.find(
+    (v) =>
+      !isElevenLabsLibraryVoice(v.category) &&
+      ['cloned', 'generated', 'professional', 'high_quality'].includes(
+        (v.category || '').toLowerCase()
+      )
+  );
+  if (owned) return owned.voiceId;
+  const anySafe = voices.find((v) => !isElevenLabsLibraryVoice(v.category));
+  if (anySafe) return anySafe.voiceId;
+  return DEFAULT_VOICE_ID;
+}const DEFAULT_MODEL_ID = 'eleven_multilingual_v2';
 
 interface AlignmentPayload {
   characters?: string[];
@@ -189,10 +218,14 @@ export async function listElevenLabsVoices(): Promise<ElevenLabsVoice[]> {
     }))
     .sort((a, b) => {
       const score = (v: ElevenLabsVoice) => {
+        const cat = (v.category || '').toLowerCase();
+        // Free API: premade OK; library thường bị 402.
+        if (cat === 'premade') return 0;
+        if (cat === 'cloned' || cat === 'generated' || cat === 'professional') return 1;
+        if (cat === 'library') return 9;
         const blob = `${v.name} ${Object.values(v.labels || {}).join(' ')}`.toLowerCase();
-        if (/(vietnam|vietnamese|tiếng việt|viet)/.test(blob)) return 0;
-        if (v.category === 'cloned' || v.category === 'professional') return 1;
-        return 2;
+        if (/(vietnam|vietnamese|tiếng việt|viet)/.test(blob)) return 2;
+        return 3;
       };
       return score(a) - score(b) || a.name.localeCompare(b.name);
     });
@@ -211,7 +244,22 @@ export async function synthesizeWithElevenLabs(options: {
   const trimmed = options.text.replace(/\s+/g, ' ').trim();
   if (!trimmed) throw new Error('ElevenLabs TTS: empty text');
 
-  const voiceId = options.voiceId.trim() || DEFAULT_VOICE_ID;
+  let voiceId = options.voiceId.trim() || DEFAULT_VOICE_ID;
+  // Tránh 402: tự đổi Voice Library → premade trước khi gọi TTS.
+  try {
+    const voices = await listElevenLabsVoices();
+    const safe = pickApiSafeElevenLabsVoiceId(voices, voiceId);
+    if (safe !== voiceId) {
+      console.warn(
+        `[ElevenLabs] Voice ${voiceId} không dùng được qua API Free (thường là Library). ` +
+          `Tự chuyển sang ${safe}.`
+      );
+      voiceId = safe;
+    }
+  } catch {
+    /* giữ voiceId gốc nếu list fail */
+  }
+
   const languageCode = resolveElevenLabsLanguageCode(options.language);
   const modelId = resolveElevenLabsModelForLanguage(options.modelId, languageCode);
   fs.mkdirSync(options.outDir, { recursive: true });
@@ -237,6 +285,34 @@ export async function synthesizeWithElevenLabs(options: {
       typeof data.detail === 'string'
         ? data.detail
         : data.detail?.message || JSON.stringify(data).slice(0, 300);
+
+    // Fallback cứng sang Rachel nếu vẫn 402 library (list voices thiếu category).
+    if (
+      res.status === 402 &&
+      /library voices/i.test(detail) &&
+      voiceId !== DEFAULT_VOICE_ID
+    ) {
+      console.warn(
+        `[ElevenLabs] 402 library voice — retry với premade ${DEFAULT_VOICE_ID}`
+      );
+      return synthesizeWithElevenLabs({
+        ...options,
+        voiceId: DEFAULT_VOICE_ID,
+      });
+    }
+
+    if (res.status === 402 && /library voices/i.test(detail)) {
+      throw new Error(
+        'ElevenLabs từ chối giọng Voice Library trên gói Free (HTTP 402). ' +
+          'Đổi API key không giúp được — dự án đang dùng giọng Library. ' +
+          'Chọn giọng premade trong tab Giọng đọc, hoặc nâng cấp gói, hoặc dùng OpenAI TTS.'
+      );
+    }
+    if (res.status === 401) {
+      throw new Error(
+        'ElevenLabs API key không hợp lệ (HTTP 401). Vào Settings → lưu lại API key mới.'
+      );
+    }
     throw new Error(`ElevenLabs TTS failed: HTTP ${res.status} ${detail}`);
   }
 

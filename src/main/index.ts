@@ -33,7 +33,8 @@ import {
   installLocalMediaProtocol,
   registerLocalMediaScheme,
 } from './services/local-media';
-import { beginJob, endJob, isJobActive } from './job-state';
+import { beginJob, endJob, getActiveJob, isJobActive } from './job-state';
+import type { JobFinishedEvent } from '../shared/types';
 import {
   createProject,
   deleteProject,
@@ -147,9 +148,34 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.startGenerate, async (_e, input: GenerateJobInput) => {
     if (isJobActive()) throw new Error('Đang có job chạy. Đợi hoàn tất.');
-    beginJob();
+    beginJob({
+      projectId: input.projectId,
+      projectName: input.projectName,
+      kind: 'generate',
+    });
     try {
-      return await runGenerateJob(input);
+      const result = await runGenerateJob(input);
+      const finished: JobFinishedEvent = {
+        projectId: result.projectId,
+        kind: 'generate',
+        ok: true,
+        result,
+      };
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send(IPC.jobFinished, finished);
+      }
+      return result;
+    } catch (err) {
+      const finished: JobFinishedEvent = {
+        projectId: input.projectId || null,
+        kind: 'generate',
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send(IPC.jobFinished, finished);
+      }
+      throw err;
     } finally {
       endJob();
     }
@@ -157,14 +183,41 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.remuxProject, async (_e, projectId: string) => {
     if (isJobActive()) throw new Error('Đang có job chạy. Đợi hoàn tất.');
-    beginJob();
+    const detail = getProject(projectId);
+    beginJob({
+      projectId,
+      projectName: detail.meta.name,
+      kind: 'remux',
+    });
     try {
-      return await remuxProject(projectId);
+      const result = await remuxProject(projectId);
+      const finished: JobFinishedEvent = {
+        projectId,
+        kind: 'remux',
+        ok: true,
+        result,
+      };
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send(IPC.jobFinished, finished);
+      }
+      return result;
+    } catch (err) {
+      const finished: JobFinishedEvent = {
+        projectId,
+        kind: 'remux',
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send(IPC.jobFinished, finished);
+      }
+      throw err;
     } finally {
       endJob();
     }
   });
 
+  ipcMain.handle(IPC.getActiveJob, () => getActiveJob());
   ipcMain.handle(IPC.listProjects, () => listProjects());
   ipcMain.handle(IPC.getProject, (_e, id: string) => getProject(id));
   ipcMain.handle(IPC.createProject, (_e, input: CreateProjectInput) => createProject(input));

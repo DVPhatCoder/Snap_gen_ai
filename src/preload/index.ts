@@ -13,7 +13,9 @@ import type {
   GenerateJobInput,
   GenerateJobResult,
   ImageFamily,
+  JobFinishedEvent,
   JobProgress,
+  ActiveJobSnapshot,
   ModelOption,
   ProjectDetail,
   ProjectDraft,
@@ -74,10 +76,16 @@ const api = {
     ipcRenderer.invoke(IPC.generateScript, input),
   startGenerate: (input: GenerateJobInput): Promise<GenerateJobResult> =>
     ipcRenderer.invoke(IPC.startGenerate, input),
+  getActiveJob: (): Promise<ActiveJobSnapshot> => ipcRenderer.invoke(IPC.getActiveJob),
   onJobProgress: (cb: (p: JobProgress) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, p: JobProgress) => cb(p);
     ipcRenderer.on(IPC.jobProgress, listener);
     return () => ipcRenderer.removeListener(IPC.jobProgress, listener);
+  },
+  onJobFinished: (cb: (event: JobFinishedEvent) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, event: JobFinishedEvent) => cb(event);
+    ipcRenderer.on(IPC.jobFinished, listener);
+    return () => ipcRenderer.removeListener(IPC.jobFinished, listener);
   },
   openPath: (target: string): Promise<string> => ipcRenderer.invoke(IPC.openPath, target),
   showItemInFolder: (target: string): Promise<void> =>

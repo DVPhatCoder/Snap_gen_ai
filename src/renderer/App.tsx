@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { UsageHistorySnapshot, UsageSnapshot } from '../shared/types';
 import UsageQuotaPanel from './components/UsageQuotaPanel';
 import UsageHistoryPanel from './components/UsageHistoryPanel';
+import GlobalJobBanner from './components/GlobalJobBanner';
 import Studio from './pages/Studio';
 import Settings from './pages/Settings';
 import Projects from './pages/Projects';
@@ -162,6 +163,10 @@ export default function App() {
         </>
       )}
       <main className={`content ${page === 'studio' ? 'editor-content' : ''}`}>
+        <GlobalJobBanner
+          visible={page !== 'studio'}
+          onOpenProject={openProject}
+        />
         {page === 'projects' && (
           <Projects onOpenProject={openProject} onCreateAndOpen={openProject} />
         )}

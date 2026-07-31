@@ -43,9 +43,16 @@ export default function ProjectVoicePanel({
         const list = await window.studio.listElevenLabsVoices();
         if (cancelled) return;
         setVoices(list);
-        // Không ghi đè giọng đã lưu của dự án — chỉ gán mặc định khi chưa có id.
-        if (list.length && !value.elevenLabsVoiceId?.trim()) {
-          onChange({ ...value, elevenLabsVoiceId: list[0].voiceId });
+        const current = list.find((v) => v.voiceId === value.elevenLabsVoiceId);
+        const isLibrary = (current?.category || '').toLowerCase() === 'library';
+        const premade =
+          list.find((v) => (v.category || '').toLowerCase() === 'premade') ||
+          list.find((v) => (v.category || '').toLowerCase() !== 'library');
+        // Chưa có id, hoặc đang lưu giọng Library (Free API bị 402) → chuyển premade.
+        if (list.length && (!value.elevenLabsVoiceId?.trim() || isLibrary) && premade) {
+          if (premade.voiceId !== value.elevenLabsVoiceId) {
+            onChange({ ...value, elevenLabsVoiceId: premade.voiceId });
+          }
         }
       } catch {
         if (!cancelled) setVoices([]);

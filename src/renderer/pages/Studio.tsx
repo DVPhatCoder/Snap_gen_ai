@@ -307,6 +307,51 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
 
   useEffect(() => window.studio.onJobProgress(setProgress), []);
 
+  /** Quay lại project đang gen nền → gắn lại progress (không mất UI). */
+  const attachRunningJob = async (id: string) => {
+    const job = await window.studio.getActiveJob();
+    if (!job.active || job.projectId !== id) return false;
+    setBusy(true);
+    if (job.progress) setProgress(job.progress);
+    return true;
+  };
+
+  useEffect(() => {
+    return window.studio.onJobFinished((event) => {
+      const id = activeProjectId || projectId;
+      if (!id || event.projectId !== id) return;
+      void (async () => {
+        try {
+          const refreshed = await window.studio.getProject(id);
+          setSceneMedia(refreshed.sceneMedia);
+          setHasNarration(Boolean(refreshed.audioPath));
+          if (refreshed.draft?.script) setScript(refreshed.draft.script);
+          if (event.ok && event.result) {
+            setResult(event.result);
+            setPreviewMode('final');
+            setPreviewKey((v) => v + 1);
+            setToast({ type: 'ok', text: 'Generate hoàn tất (chạy nền).' });
+          } else if (!event.ok) {
+            setError(event.error || 'Job thất bại.');
+            setToast({ type: 'error', text: event.error || 'Job thất bại.' });
+          }
+        } finally {
+          setBusy(false);
+          setProgress(
+            event.ok
+              ? { phase: 'done', message: 'Hoàn tất!', percent: 100 }
+              : {
+                  phase: 'error',
+                  message: event.error || 'Lỗi',
+                  percent: 100,
+                  error: event.error,
+                }
+          );
+        }
+      })();
+    });
+  }, [activeProjectId, projectId]);
+
   useEffect(() => {
     return () => {
       if (remuxTimer.current) clearTimeout(remuxTimer.current);
@@ -357,9 +402,19 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
             title: draft?.script?.title ?? detail.meta.name,
           });
         }
+        const stillRunning = await attachRunningJob(detail.meta.id);
+        if (!stillRunning) {
+          // Badge "Đang gen" cũ nhưng job đã chết → UI không kẹt Generate tắt.
+          setBusy(false);
+          if (detail.meta.status === 'generating') {
+            setToast({
+              type: 'error',
+              text: 'Job trước đã dừng. Bấm Generate nếu cần chạy lại.',
+            });
+          }
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
-      } finally {
         setBusy(false);
       }
     })();

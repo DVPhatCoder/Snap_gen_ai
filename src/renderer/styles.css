@@ -154,6 +154,41 @@ button:disabled {
   background: var(--bg);
 }
 
+.global-job-banner {
+  width: min(1040px, 100%);
+  margin: 0 auto 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(37, 224, 208, 0.35);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(37, 224, 208, 0.1), rgba(16, 17, 22, 0.95));
+  display: grid;
+  gap: 10px;
+}
+
+.global-job-banner-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.global-job-banner-copy strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.global-job-banner-copy span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.global-job-banner-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.global-job-banner-bar .progress-wrap {
+  margin: 0;
+}
+
 .panel {
   width: min(1040px, 100%);
   margin: 0 auto;
@@ -998,6 +1033,21 @@ h2 {
   gap: 8px;
 }
 
+.el-voice-library-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.el-voice-library-toggle input {
+  width: auto;
+  margin: 0;
+}
+
 .el-voice-tools input[type='search'] {
   width: 100%;
   height: 36px;
@@ -1203,6 +1253,14 @@ h2 {
 
 .el-voice-row.active {
   background: rgba(37, 224, 208, 0.08);
+}
+
+.el-voice-row.is-library .el-voice-pick span {
+  color: #d4a017;
+}
+
+.voice-library-warn {
+  color: #e6a23c !important;
 }
 
 .el-voice-pick {

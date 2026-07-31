@@ -104,6 +104,11 @@ export default function ElevenLabsVoicePicker({
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const selected = voices.find((v) => v.voiceId === value);
+  const selectedIsLibrary = (selected?.category || '').toLowerCase() === 'library';
+  const libraryHidden = useMemo(
+    () => voices.filter((v) => (v.category || '').toLowerCase() === 'library').length,
+    [voices]
+  );
 
   /** Accent chuẩn + accent thực tế có trên voice list (nếu khác). */
   const accentOptions = useMemo(() => {
@@ -129,9 +134,11 @@ export default function ElevenLabsVoicePicker({
     return [...map.values()].sort((a, b) => a.label.localeCompare(b.label, 'en'));
   }, [voices]);
 
+  // Luôn ẩn Voice Library — Free API không TTS được (402), checkbox trước đó dễ hiểu nhầm.
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return voices.filter((v) => {
+      if ((v.category || '').toLowerCase() === 'library') return false;
       if (!voiceMatchesLanguage(v, langFilter)) return false;
       if (!voiceMatchesAccent(v, accentFilter)) return false;
       if (!q) return true;
@@ -247,8 +254,7 @@ export default function ElevenLabsVoicePicker({
       <div className="el-voice-list" role="listbox" aria-label="Danh sách giọng">
         {filtered.length === 0 ? (
           <p className="muted pad">
-            Không có giọng khớp bộ lọc trong tài khoản. Thử All languages hoặc thêm voice từ Voice
-            Library.
+            Không có giọng premade khớp bộ lọc. Thử All languages / xóa ô tìm kiếm.
           </p>
         ) : (
           filtered.map((voice) => {
@@ -284,10 +290,17 @@ export default function ElevenLabsVoicePicker({
           })
         )}
       </div>
+      {selectedIsLibrary ? (
+        <p className="hint voice-library-warn">
+          Giọng đang lưu thuộc Voice Library — Free API bị 402. Hãy chọn một giọng trong danh sách
+          (premade) rồi Generate lại.
+        </p>
+      ) : null}
       <p className="hint">
-        {filtered.length}/{voices.length} giọng · {ELEVENLABS_LANGUAGES.length} ngôn ngữ ElevenLabs
+        {filtered.length} giọng dùng được qua API
+        {libraryHidden ? ` · đã ẩn ${libraryHidden} Voice Library` : ''}
         {previewError ? ` · ${previewError}` : ''}
-        {!selected?.previewUrl && selected
+        {!selected?.previewUrl && selected && !selectedIsLibrary
           ? ' · Giọng này không có sample sẵn — nghe thử sẽ gọi TTS ngắn.'
           : ''}
       </p>

@@ -247,6 +247,26 @@ export interface JobProgress {
   error?: string;
 }
 
+export type ActiveJobKind = 'generate' | 'remux';
+
+/** Snapshot job đang chạy trên main — dùng khi quay lại UI sau khi thoát Studio. */
+export interface ActiveJobSnapshot {
+  active: boolean;
+  projectId: string | null;
+  projectName: string | null;
+  kind: ActiveJobKind | null;
+  progress: JobProgress | null;
+  startedAt: number | null;
+}
+
+export interface JobFinishedEvent {
+  projectId: string | null;
+  kind: ActiveJobKind | null;
+  ok: boolean;
+  error?: string;
+  result?: GenerateJobResult;
+}
+
 export interface GenerateJobResult {
   projectId: string;
   projectName: string;

@@ -55,6 +55,7 @@ import {
   safeSceneKey,
   sceneMediaTarget,
 } from './scene-media';
+import { setActiveJobProgress, updateActiveJobMeta } from '../job-state';
 
 const RAW_NARRATION_FILE = 'narration-raw.mp3';
 const TIMING_FILE = 'narration-timing.json';
@@ -89,7 +90,9 @@ function emitProgress(progress: JobProgress): void {
   const raw = progress.percent ?? lastOverallPercent;
   const percent = Math.min(100, Math.max(lastOverallPercent, Math.round(raw)));
   lastOverallPercent = percent;
-  emit({ ...progress, percent });
+  const next = { ...progress, percent };
+  setActiveJobProgress(next);
+  emit(next);
 }
 
 /** Snapgen sometimes returns 0–1; normalize to 0–100. */
@@ -409,6 +412,7 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
     mediaKind,
     stylePrompt: input.stylePrompt,
   });
+  updateActiveJobMeta({ projectId: meta.id, projectName: meta.name });
 
   // Ghi voice theo dự án (GenerateJobInput ưu tiên).
   {

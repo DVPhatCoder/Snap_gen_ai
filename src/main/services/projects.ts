@@ -176,11 +176,27 @@ export function listProjects(): ProjectMeta[] {
 }
 
 export function getProject(id: string): ProjectDetail {
-  const meta = readMeta(id);
+  let meta = readMeta(id);
   if (!meta) throw new Error(`Không tìm thấy dự án: ${id}`);
 
   const dir = projectDir(id);
   const videoPath = path.join(dir, 'final.mp4');
+  const hasVideo = fs.existsSync(videoPath);
+
+  // Heal badge "Đang gen" khi job main đã hết nhưng meta chưa cập nhật.
+  if (meta.status === 'generating' && !isJobActive()) {
+    meta = {
+      ...meta,
+      status: hasVideo ? 'ready' : 'error',
+      lastError: hasVideo
+        ? ''
+        : meta.lastError || 'Job bị gián đoạn trước khi tạo xong video.',
+      updatedAt: nowIso(),
+      hasVideo,
+    };
+    writeMeta(meta);
+  }
+
   const srtPath = path.join(dir, 'subs.srt');
   const audioPath = path.join(dir, 'narration.mp3');
   const draft = readDraft(id);
@@ -203,10 +219,10 @@ export function getProject(id: string): ProjectDetail {
   return {
     meta: {
       ...meta,
-      hasVideo: fs.existsSync(videoPath),
+      hasVideo,
     },
     draft,
-    videoPath: fs.existsSync(videoPath) ? videoPath : null,
+    videoPath: hasVideo ? videoPath : null,
     srtPath: fs.existsSync(srtPath) ? srtPath : null,
     audioPath: fs.existsSync(audioPath) ? audioPath : null,
     sceneMedia,
