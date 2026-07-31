@@ -28,6 +28,8 @@ import {
   synthesizeContinuousNarration,
   type SceneTiming,
 } from './openai-audio';
+import { synthesizeWithElevenLabs, resolveElevenLabsLanguageCode, resolveElevenLabsModelForLanguage } from './elevenlabs-tts';
+import { getElevenLabsSessionStatus } from './elevenlabs-auth';
 import {
   assembleFinalVideo,
   assembleSlideshowFromImages,
@@ -110,13 +112,25 @@ async function prepareNarration(options: {
   ttsModel: string;
   language?: string;
   refresh: boolean;
+  ttsProvider: 'openai' | 'elevenlabs';
+  elevenLabsVoiceId?: string;
+  elevenLabsModelId?: string;
 }): Promise<NarrationBundle> {
   const { projectDir, workDir, apiKey, voice, ttsModel } = options;
   const scenes = options.script.scenes;
   const text = buildContinuousNarrationText(scenes);
   if (!text) throw new Error('Kịch bản chưa có lời thoại (narration_segment) để tạo voiceover.');
 
-  const hash = narrationHash(text, voice, ttsModel);
+  const languageCode = resolveElevenLabsLanguageCode(options.language);
+  const resolvedElModel =
+    options.ttsProvider === 'elevenlabs'
+      ? resolveElevenLabsModelForLanguage(options.elevenLabsModelId, languageCode)
+      : '';
+  const voiceKey =
+    options.ttsProvider === 'elevenlabs'
+      ? `elevenlabs:${options.elevenLabsVoiceId || ''}:${resolvedElModel}:${languageCode || ''}`
+      : `openai:${voice}:${ttsModel}`;
+  const hash = narrationHash(text, voiceKey, options.ttsProvider);
   const rawPath = path.join(projectDir, RAW_NARRATION_FILE);
   const audioPath = path.join(projectDir, 'narration.mp3');
   const srtPath = path.join(projectDir, 'subs.srt');
@@ -134,6 +148,26 @@ async function prepareNarration(options: {
   if (canReuse && cache) {
     timings = cache.timings;
     if (!fs.existsSync(srtPath)) fs.writeFileSync(srtPath, '', 'utf8');
+  } else if (options.ttsProvider === 'elevenlabs') {
+    const synthesized = await synthesizeWithElevenLabs({
+      text,
+      voiceId: options.elevenLabsVoiceId || '21m00Tcm4TlvDq8ikWAM',
+      modelId: options.elevenLabsModelId || 'eleven_multilingual_v2',
+      language: options.language,
+      outDir: projectDir,
+      fileName: RAW_NARRATION_FILE,
+    });
+    // Keep canonical names used by the rest of the pipeline.
+    if (synthesized.srtPath !== srtPath && fs.existsSync(synthesized.srtPath)) {
+      fs.copyFileSync(synthesized.srtPath, srtPath);
+    }
+    const audioDuration = await getDurationSafe(synthesized.audioPath, 0);
+    timings = computeSceneTimings({ scenes, words: synthesized.words, audioDuration });
+    fs.writeFileSync(
+      path.join(projectDir, TIMING_FILE),
+      JSON.stringify({ hash, audioDuration, timings } satisfies NarrationCache, null, 2),
+      'utf8'
+    );
   } else {
     const synthesized = await synthesizeContinuousNarration({
       apiKey,
@@ -191,10 +225,12 @@ async function prepareNarration(options: {
 function persistScript(projectId: string, script: ScriptDraft): void {
   const detail = getProject(projectId);
   if (!detail.draft) return;
+  const totalSec = script.scenes.reduce((sum, scene) => sum + scene.duration_hint, 0);
   saveProjectDraft(projectId, {
     ...detail.draft,
     script,
     sceneCount: script.scenes.length,
+    targetDurationSec: totalSec || detail.draft.targetDurationSec,
   });
 }
 
@@ -237,6 +273,9 @@ export async function remuxProject(projectId: string): Promise<GenerateJobResult
         ttsModel: settings.openaiTtsModel,
         language: draft.language,
         refresh: false,
+        ttsProvider: settings.ttsProvider,
+        elevenLabsVoiceId: settings.elevenLabsVoiceId,
+        elevenLabsModelId: settings.elevenLabsModelId,
       });
       audioPath = rebuilt.audioPath;
       srtPath = rebuilt.srtPath;
@@ -304,7 +343,15 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
   const mediaKind = input.mediaKind || 'video';
 
   if (!keys.snapgenApiKey) throw new Error('Thiếu Snapgen API key. Vào Settings để cấu hình.');
-  if (!keys.openaiApiKey) throw new Error('Thiếu OpenAI API key. Vào Settings để cấu hình.');
+  if (settings.ttsProvider === 'openai' && !keys.openaiApiKey) {
+    throw new Error('Thiếu OpenAI API key. Vào Settings để cấu hình.');
+  }
+  if (settings.ttsProvider === 'elevenlabs') {
+    const el = await getElevenLabsSessionStatus();
+    if (!el.loggedIn) {
+      throw new Error('Chưa đăng nhập ElevenLabs. Vào Settings → ElevenLabs để đăng nhập.');
+    }
+  }
 
   const meta = ensureProject({
     projectId: input.projectId || undefined,
@@ -337,10 +384,12 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
 
   try {
     const refreshNarration = input.refreshNarration !== false;
+    const ttsLabel =
+      settings.ttsProvider === 'elevenlabs' ? 'ElevenLabs' : 'OpenAI TTS';
     emit({
       phase: 'tts',
       message: refreshNarration
-        ? 'Đang đọc toàn bộ kịch bản thành một mạch voiceover (OpenAI TTS)...'
+        ? `Đang đọc toàn bộ kịch bản thành một mạch voiceover (${ttsLabel})...`
         : 'Giữ voiceover hiện có — khớp lại mốc từng scene.',
       percent: 4,
     });
@@ -354,6 +403,9 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
       ttsModel: settings.openaiTtsModel,
       language: input.language,
       refresh: refreshNarration,
+      ttsProvider: settings.ttsProvider,
+      elevenLabsVoiceId: settings.elevenLabsVoiceId,
+      elevenLabsModelId: settings.elevenLabsModelId,
     });
     const audioPath = narration.audioPath;
     const srtPath = narration.srtPath;
@@ -363,7 +415,10 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
 
     emit({
       phase: 'whisper',
-      message: `Đã khớp lời thoại với ${script.scenes.length} scene theo timestamp Whisper.`,
+      message:
+        settings.ttsProvider === 'elevenlabs'
+          ? `Đã khớp lời thoại với ${script.scenes.length} scene theo timestamp ElevenLabs.`
+          : `Đã khớp lời thoại với ${script.scenes.length} scene theo timestamp Whisper.`,
       percent: 12,
     });
 

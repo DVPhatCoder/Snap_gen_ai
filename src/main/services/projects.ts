@@ -18,9 +18,29 @@ import type {
   VideoFamily,
   ImageFamily,
 } from '../../shared/types';
+import { DEFAULT_DURATION_PER_SCENE } from '../../shared/models';
 
 const META_FILE = 'meta.json';
 const DRAFT_FILE = 'draft.json';
+const DEFAULT_TARGET_DURATION_SEC = 60;
+
+function resolveTargetDurationSec(
+  raw: Partial<ProjectDraft>,
+  sceneCount: number
+): number {
+  if (typeof raw.targetDurationSec === 'number' && raw.targetDurationSec > 0) {
+    return Math.round(raw.targetDurationSec);
+  }
+  const fromScript = raw.script?.scenes?.reduce(
+    (sum, scene) => sum + (Number(scene.duration_hint) || 0),
+    0
+  );
+  if (fromScript && fromScript > 0) return Math.round(fromScript);
+  return Math.max(
+    DEFAULT_DURATION_PER_SCENE,
+    sceneCount * DEFAULT_DURATION_PER_SCENE
+  );
+}
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -71,10 +91,12 @@ function readDraft(id: string): ProjectDraft | null {
   if (!fs.existsSync(p)) return null;
   try {
     const raw = JSON.parse(fs.readFileSync(p, 'utf8')) as Partial<ProjectDraft>;
+    const sceneCount = raw.sceneCount ?? 3;
     return {
       brief: raw.brief ?? '',
       language: raw.language ?? 'Tiếng Việt',
-      sceneCount: raw.sceneCount ?? 3,
+      sceneCount,
+      targetDurationSec: resolveTargetDurationSec(raw, sceneCount),
       family: raw.family ?? 'veo',
       model: raw.model ?? 'veo-3.1',
       aspectRatio: raw.aspectRatio ?? '16:9',
@@ -188,6 +210,9 @@ export function createProject(input: CreateProjectInput): ProjectMeta {
     resolution: input.resolution ?? (mediaKind === 'image' ? '2k' : '720p'),
     mode: input.mode,
     sceneCount: input.sceneCount ?? 3,
+    targetDurationSec:
+      input.targetDurationSec ??
+      (input.sceneCount ?? 3) * DEFAULT_DURATION_PER_SCENE,
     hasVideo: false,
     mediaKind,
     stylePrompt: input.stylePrompt ?? '',
@@ -198,6 +223,7 @@ export function createProject(input: CreateProjectInput): ProjectMeta {
     brief: meta.brief ?? '',
     language: meta.language ?? 'Tiếng Việt',
     sceneCount: meta.sceneCount ?? 3,
+    targetDurationSec: meta.targetDurationSec ?? DEFAULT_TARGET_DURATION_SEC,
     family: (meta.family ?? 'veo') as VideoFamily | ImageFamily,
     model: meta.model ?? 'veo-3.1',
     aspectRatio: meta.aspectRatio ?? '16:9',
@@ -243,6 +269,7 @@ export function saveProjectDraft(
     brief: draft.brief,
     language: draft.language,
     sceneCount: draft.sceneCount,
+    targetDurationSec: draft.targetDurationSec,
     family: draft.family,
     model: draft.model,
     aspectRatio: draft.aspectRatio,
@@ -289,6 +316,9 @@ export function ensureProject(options: {
       existing.resolution = options.resolution;
       existing.mode = options.mode;
       existing.sceneCount = options.script.scenes.length;
+      existing.targetDurationSec =
+        options.script.scenes.reduce((sum, scene) => sum + scene.duration_hint, 0) ||
+        existing.targetDurationSec;
       existing.mediaKind = options.mediaKind ?? existing.mediaKind ?? 'video';
       existing.stylePrompt = options.stylePrompt ?? existing.stylePrompt ?? '';
       writeMeta(existing);
@@ -296,6 +326,8 @@ export function ensureProject(options: {
         brief: existing.brief ?? '',
         language: existing.language ?? 'Tiếng Việt',
         sceneCount: options.script.scenes.length,
+        targetDurationSec:
+          existing.targetDurationSec ?? DEFAULT_TARGET_DURATION_SEC,
         family: options.family,
         model: options.model,
         aspectRatio: options.aspectRatio,
@@ -314,11 +346,17 @@ export function ensureProject(options: {
     options.script.title?.trim() ||
     `Dự án ${new Date().toLocaleString('vi-VN')}`;
 
+  const scriptDuration = options.script.scenes.reduce(
+    (sum, scene) => sum + scene.duration_hint,
+    0
+  );
+
   const created = createProject({
     name,
     brief: options.brief,
     language: options.language,
     sceneCount: options.script.scenes.length,
+    targetDurationSec: scriptDuration || DEFAULT_TARGET_DURATION_SEC,
     family: options.family,
     model: options.model,
     aspectRatio: options.aspectRatio,
@@ -335,6 +373,7 @@ export function ensureProject(options: {
     brief: options.brief ?? '',
     language: options.language ?? 'Tiếng Việt',
     sceneCount: options.script.scenes.length,
+    targetDurationSec: scriptDuration || DEFAULT_TARGET_DURATION_SEC,
     family: options.family,
     model: options.model,
     aspectRatio: options.aspectRatio,

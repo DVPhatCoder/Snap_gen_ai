@@ -25,8 +25,20 @@ export interface AppSettings {
   openaiModel: string;
   openaiTtsModel: string;
   openaiTtsVoice: string;
+  /** Voiceover engine: OpenAI TTS or ElevenLabs (cookie session). */
+  ttsProvider: 'openai' | 'elevenlabs';
+  elevenLabsVoiceId: string;
+  elevenLabsModelId: string;
   burnSubtitles: boolean;
   lastExportDir?: string;
+}
+
+export interface ElevenLabsVoice {
+  voiceId: string;
+  name: string;
+  previewUrl?: string;
+  category?: string;
+  labels?: Record<string, string>;
 }
 
 export type ExportMode = 'final' | 'scenes';
@@ -71,11 +83,17 @@ export interface ScriptDraft {
 export interface GenerateIdeaInput {
   brief: string;
   language: string;
-  sceneCount: number;
+  /** Desired total video length in seconds. Scene count & per-scene lengths are derived. */
+  targetDurationSec: number;
+  /** Optional override; otherwise estimated from target duration. */
+  sceneCount?: number;
   family: VideoFamily | ImageFamily;
   model: string;
   aspectRatio: string;
   resolution: string;
+  /** Max seconds one generate/extend API call can produce (for prompt guidance). */
+  maxShotSec?: number;
+  /** @deprecated Prefer variable durations from content; kept for older callers. */
   durationPerScene?: number;
   mediaKind: MediaKind;
   stylePrompt?: string;
@@ -97,6 +115,8 @@ export interface ProjectMeta {
   resolution?: string;
   mode?: string;
   sceneCount?: number;
+  /** Desired total video length in seconds (drives auto scene split). */
+  targetDurationSec?: number;
   hasVideo?: boolean;
   lastError?: string;
   mediaKind?: MediaKind;
@@ -107,6 +127,8 @@ export interface ProjectDraft {
   brief: string;
   language: string;
   sceneCount: number;
+  /** Desired total video length in seconds (drives auto scene split). */
+  targetDurationSec: number;
   family: VideoFamily | ImageFamily;
   model: string;
   aspectRatio: string;
@@ -140,6 +162,7 @@ export interface CreateProjectInput {
   brief?: string;
   language?: string;
   sceneCount?: number;
+  targetDurationSec?: number;
   family?: VideoFamily | ImageFamily;
   model?: string;
   aspectRatio?: string;
@@ -204,6 +227,16 @@ export interface ConnectionTestResult {
   message: string;
 }
 
+export interface ElevenLabsSessionStatus {
+  loggedIn: boolean;
+  email?: string;
+  displayName?: string;
+  updatedAt?: string;
+  cookieCount: number;
+  /** True when xi-api-key was auto-captured from the in-app browser session. */
+  hasApiCredential?: boolean;
+}
+
 export const OPENAI_TTS_VOICES = [
   'alloy',
   'ash',
@@ -219,3 +252,10 @@ export const OPENAI_TTS_VOICES = [
 ] as const;
 
 export const OPENAI_TTS_MODELS = ['gpt-4o-mini-tts', 'tts-1-hd', 'tts-1'] as const;
+
+export const ELEVENLABS_TTS_MODELS = [
+  'eleven_flash_v2_5',
+  'eleven_turbo_v2_5',
+  'eleven_v3',
+  'eleven_multilingual_v2',
+] as const;

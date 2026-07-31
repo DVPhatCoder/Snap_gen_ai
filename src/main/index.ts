@@ -17,6 +17,17 @@ import { testAccount } from './services/snapgen';
 import { generateScript, testOpenAI } from './services/openai';
 import { remuxProject, runGenerateJob } from './services/pipeline';
 import {
+  clearElevenLabsSession,
+  getElevenLabsSessionStatus,
+  installElevenLabsApiKeyCapture,
+  onElevenLabsSessionChange,
+  openElevenLabsApiKeysPage,
+  openElevenLabsLogin,
+  saveElevenLabsApiKeyManually,
+  testElevenLabsSession,
+} from './services/elevenlabs-auth';
+import { listElevenLabsVoices } from './services/elevenlabs-tts';
+import {
   createProject,
   deleteProject,
   getProject,
@@ -56,6 +67,12 @@ function createWindow(): void {
 }
 
 function registerIpc(): void {
+  // Forge rebuilds main without always restarting Electron; clear first so
+  // handlers can be re-registered safely after `rs`.
+  for (const channel of Object.values(IPC)) {
+    ipcMain.removeHandler(channel);
+  }
+
   ipcMain.handle(IPC.getKeys, () => getKeys());
   ipcMain.handle(IPC.saveKeys, (_e, keys: ApiKeys) => {
     saveKeys(keys);
@@ -77,6 +94,30 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.testSnapgen, async () => testAccount(getKeys().snapgenApiKey));
   ipcMain.handle(IPC.testOpenAI, async () => testOpenAI(getKeys().openaiApiKey));
+  ipcMain.handle(IPC.testElevenLabs, async () => testElevenLabsSession());
+  ipcMain.handle(IPC.elevenLabsOpenLogin, async () => openElevenLabsLogin(mainWindow));
+  ipcMain.handle(IPC.elevenLabsOpenApiKeys, async () => openElevenLabsApiKeysPage(mainWindow));
+  ipcMain.handle(IPC.elevenLabsSaveApiKey, async (_e, apiKey: string) =>
+    saveElevenLabsApiKeyManually(apiKey)
+  );
+  ipcMain.handle(IPC.elevenLabsGetSession, async () => getElevenLabsSessionStatus());
+  ipcMain.handle(IPC.elevenLabsClearSession, async () => clearElevenLabsSession());
+  let listVoicesInFlight: Promise<unknown> | null = null;
+  ipcMain.handle(IPC.elevenLabsListVoices, async () => {
+    if (listVoicesInFlight) return listVoicesInFlight;
+    listVoicesInFlight = listElevenLabsVoices().finally(() => {
+      listVoicesInFlight = null;
+    });
+    return listVoicesInFlight;
+  });
+
+  onElevenLabsSessionChange((status) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send(IPC.elevenLabsSessionChanged, status);
+      }
+    }
+  });
 
   ipcMain.handle(IPC.generateScript, async (_e, input: GenerateIdeaInput) => {
     const keys = getKeys();
@@ -202,6 +243,7 @@ async function exportFinalFile(
 }
 
 app.whenReady().then(() => {
+  installElevenLabsApiKeyCapture();
   registerIpc();
   createWindow();
 

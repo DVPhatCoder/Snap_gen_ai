@@ -1,5 +1,9 @@
 import type { ScriptDraft } from '../../shared/types';
-import { maxSingleShotDuration } from '../../shared/models';
+import {
+  MAX_SCENE_DURATION_SEC,
+  TYPICAL_NARRATIVE_BEAT_SEC,
+  maxSingleShotDuration,
+} from '../../shared/models';
 
 interface Props {
   script: ScriptDraft;
@@ -22,7 +26,7 @@ export default function SceneEditor({ script, onChange, modelId, mediaKind }: Pr
         id: `scene-${script.scenes.length + 1}`,
         visual_prompt: '',
         narration_segment: '',
-        duration_hint: 8,
+        duration_hint: TYPICAL_NARRATIVE_BEAT_SEC,
       },
     ];
     onChange({ ...script, scenes });
@@ -86,17 +90,20 @@ export default function SceneEditor({ script, onChange, modelId, mediaKind }: Pr
             <input
               type="number"
               min={1}
-              max={60}
+              max={MAX_SCENE_DURATION_SEC}
               value={scene.duration_hint}
               onChange={(e) =>
                 updateScene(index, {
-                  duration_hint: Math.min(60, Math.max(1, Number(e.target.value) || 8)),
+                  duration_hint: Math.min(
+                    MAX_SCENE_DURATION_SEC,
+                    Math.max(1, Number(e.target.value) || TYPICAL_NARRATIVE_BEAT_SEC)
+                  ),
                 })
               }
             />
             {mediaKind === 'video' && scene.duration_hint > maxShot && (
               <p className="hint">
-                &gt;{maxShot}s → cảnh này sẽ auto-extend (không nối sang cảnh khác).
+                &gt;{maxShot}s → cảnh này sẽ auto-extend / chia đoạn (không nối sang cảnh khác).
               </p>
             )}
           </div>

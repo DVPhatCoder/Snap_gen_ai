@@ -5,6 +5,8 @@ import type {
   AppSettings,
   ConnectionTestResult,
   CreateProjectInput,
+  ElevenLabsSessionStatus,
+  ElevenLabsVoice,
   ExportMediaRequest,
   ExportMediaResult,
   GenerateIdeaInput,
@@ -36,6 +38,24 @@ const api = {
   }> => ipcRenderer.invoke(IPC.getModels),
   testSnapgen: (): Promise<ConnectionTestResult> => ipcRenderer.invoke(IPC.testSnapgen),
   testOpenAI: (): Promise<ConnectionTestResult> => ipcRenderer.invoke(IPC.testOpenAI),
+  testElevenLabs: (): Promise<ConnectionTestResult> => ipcRenderer.invoke(IPC.testElevenLabs),
+  openElevenLabsLogin: (): Promise<ElevenLabsSessionStatus> =>
+    ipcRenderer.invoke(IPC.elevenLabsOpenLogin),
+  openElevenLabsApiKeys: (): Promise<ElevenLabsSessionStatus> =>
+    ipcRenderer.invoke(IPC.elevenLabsOpenApiKeys),
+  saveElevenLabsApiKey: (apiKey: string): Promise<ElevenLabsSessionStatus> =>
+    ipcRenderer.invoke(IPC.elevenLabsSaveApiKey, apiKey),
+  getElevenLabsSession: (): Promise<ElevenLabsSessionStatus> =>
+    ipcRenderer.invoke(IPC.elevenLabsGetSession),
+  clearElevenLabsSession: (): Promise<ElevenLabsSessionStatus> =>
+    ipcRenderer.invoke(IPC.elevenLabsClearSession),
+  listElevenLabsVoices: (): Promise<ElevenLabsVoice[]> =>
+    ipcRenderer.invoke(IPC.elevenLabsListVoices),
+  onElevenLabsSessionChange: (cb: (status: ElevenLabsSessionStatus) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, status: ElevenLabsSessionStatus) => cb(status);
+    ipcRenderer.on(IPC.elevenLabsSessionChanged, listener);
+    return () => ipcRenderer.removeListener(IPC.elevenLabsSessionChanged, listener);
+  },
   generateScript: (input: GenerateIdeaInput): Promise<ScriptDraft> =>
     ipcRenderer.invoke(IPC.generateScript, input),
   startGenerate: (input: GenerateJobInput): Promise<GenerateJobResult> =>

@@ -223,7 +223,7 @@ export default function Timeline({
               className="audio-clip"
               style={{ width: contentWidth - TRACK_PAD * 2 }}
             >
-              <span>Voiceover · OpenAI TTS</span>
+              <span>Voiceover</span>
               <div className="waveform">▂▄▆▃▅▇▂▅▃▆▄▇▃▅▂▆▄▇▃▅▂▆▄▇</div>
             </div>
           )}

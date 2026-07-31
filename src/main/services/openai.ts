@@ -1,4 +1,10 @@
 import type { GenerateIdeaInput, ScriptDraft } from '../../shared/types';
+import {
+  familySupportsExtend,
+  maxSingleShotDuration,
+  normalizeSceneDurations,
+  planScenesFromDuration,
+} from '../../shared/models';
 
 function extractJson(text: string): unknown {
   const trimmed = text.trim();
@@ -28,6 +34,14 @@ export async function generateScript(
   input: GenerateIdeaInput
 ): Promise<ScriptDraft> {
   const isImage = input.mediaKind === 'image';
+  const plan = planScenesFromDuration(input.targetDurationSec);
+  const targetDurationSec = plan.targetDurationSec;
+  const maxShot =
+    input.maxShotSec ?? maxSingleShotDuration(input.model) ?? plan.typicalBeatSec;
+  const canExtend = !isImage && familySupportsExtend(String(input.family));
+  const sceneCountHint =
+    input.sceneCount && input.sceneCount > 0 ? input.sceneCount : plan.sceneCountHint;
+
   const styleLine = input.stylePrompt?.trim()
     ? `- Global visual style (MUST apply to every visual_prompt for consistency): ${input.stylePrompt.trim()}`
     : '- Keep visual continuity and a consistent look across scenes.';
@@ -35,6 +49,23 @@ export async function generateScript(
   const visualRule = isImage
     ? '- visual_prompt must be detailed English suitable for text-to-image AI (composition, lighting, subject, camera angle). Do NOT describe motion or camera moves over time.'
     : '- visual_prompt must be detailed cinematic English suitable for text-to-video AI (camera, lighting, motion). Each scene is a SEPARATE shot with a hard cut — do NOT write as one continuous take across scenes.';
+
+  const durationRules = isImage
+    ? `- Create about ${sceneCountHint} scenes (allowed range ${plan.sceneCountMin}-${plan.sceneCountMax}).
+- duration_hint is the slide / narration window for that scene in seconds.
+- Vary duration_hint by content; denser narration → longer duration_hint.
+- Sum of all duration_hint must be approximately ${targetDurationSec} seconds.`
+    : `- Target total video length: exactly about ${targetDurationSec} seconds.
+- Auto-split into roughly ${sceneCountHint} scenes (allowed ${plan.sceneCountMin}-${plan.sceneCountMax}) based on narrative beats — do NOT force every scene to the same length.
+- duration_hint MUST vary with content: short beats 5-8s, normal 8-16s, important/emotional beats may be longer.
+- Sum of all duration_hint ≈ ${targetDurationSec}s (this is critical).
+- This video model can generate/extend up to ${maxShot}s per API call.
+- If a scene needs duration_hint > ${maxShot}s, that is OK — the pipeline will ${
+        canExtend
+          ? 'auto-extend the same shot'
+          : 'split the scene into multiple clips'
+      } to cover it. Do NOT artificially chop a continuous beat just to stay under ${maxShot}s.
+- CRITICAL: each narration_segment must take about duration_hint seconds to speak at a natural pace (≈2.5 words/sec). Match word count to duration_hint.`;
 
   const system = `You are a professional AI ${isImage ? 'art director' : 'video director'} and screenwriter.
 Return ONLY valid JSON (no markdown) with this exact shape:
@@ -52,18 +83,19 @@ Return ONLY valid JSON (no markdown) with this exact shape:
 }
 Rules:
 - Language for narration: ${input.language}
-- Create exactly ${input.sceneCount} scenes.
+${durationRules}
 ${visualRule}
 ${styleLine}
 - narration is the full voiceover; narration_segment is the portion spoken over that scene.
 - The narration_segments are read aloud as ONE continuous take, so they must flow into each other without repeating context or restarting the topic.
-- CRITICAL: each narration_segment must take about duration_hint seconds to speak aloud at a natural pace (roughly 2.5 words per second). A ${input.durationPerScene ?? 8}s scene needs about ${Math.round((input.durationPerScene ?? 8) * 2.5)} words — not a short fragment, not a long paragraph.
-- duration_hint should match spoken segment length (typically ${input.durationPerScene ?? 8}s, but may be longer for a slow scene — up to 24s is fine).
 - Between scenes: clear narrative beats / hard cuts. Do not assume camera continuity from previous scene.
 - Keep story continuity, not camera continuity.
-- If many scenes are requested, keep each narration_segment concise so the full story still fits; do not invent filler that breaks the brief.`;
+- Pace the full story to fit the target length; do not invent filler that breaks the brief.`;
 
   const user = `Brief: ${input.brief}
+Target duration: ${targetDurationSec}s (variable scene lengths, sum ≈ ${targetDurationSec}s)
+Suggested scenes: ~${sceneCountHint} (range ${plan.sceneCountMin}-${plan.sceneCountMax})
+${isImage ? '' : `Model max shot / extend chunk: ${maxShot}s (${canExtend ? 'extend supported' : 'multi-cut if longer'})`}
 Media: ${input.mediaKind}
 Model: ${input.family}/${input.model}
 Aspect ratio: ${input.aspectRatio}
@@ -102,12 +134,13 @@ ${input.stylePrompt?.trim() ? `Style guide: ${input.stylePrompt.trim()}` : ''}`;
   const parsed = extractJson(content) as ScriptDraft;
   if (!parsed.scenes?.length) throw new Error('Script JSON missing scenes.');
 
-  parsed.scenes = parsed.scenes.map((s, i) => ({
+  const normalized = normalizeSceneDurations(parsed.scenes, targetDurationSec);
+  parsed.scenes = normalized.map((s, i) => ({
     // Stable, unique id becomes the filename: clips/scene-01.mp4, scene-02.mp4...
     id: `scene-${String(i + 1).padStart(2, '0')}`,
     visual_prompt: s.visual_prompt || '',
     narration_segment: s.narration_segment || '',
-    duration_hint: Math.min(60, Math.max(2, Number(s.duration_hint) || input.durationPerScene || 8)),
+    duration_hint: s.duration_hint,
   }));
 
   if (!parsed.narration) {

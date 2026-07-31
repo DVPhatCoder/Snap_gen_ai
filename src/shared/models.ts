@@ -346,3 +346,120 @@ export function withStylePrompt(visualPrompt: string, stylePrompt?: string): str
   if (visualPrompt.toLowerCase().includes(style.toLowerCase())) return visualPrompt;
   return `${visualPrompt.trim()}. Style: ${style}`;
 }
+
+/** Fallback when a model has no declared durations (not a hard scene length). */
+export const DEFAULT_DURATION_PER_SCENE = 8;
+
+/** Typical narrative beat used only to estimate scene count ranges. */
+export const TYPICAL_NARRATIVE_BEAT_SEC = 10;
+const MIN_NARRATIVE_BEAT_SEC = 5;
+const MAX_NARRATIVE_BEAT_SEC = 24;
+/** Absolute ceiling for one scene (extend/multi-cut covers model shot limits). */
+export const MAX_SCENE_DURATION_SEC = 180;
+const WORDS_PER_SECOND = 2.5;
+
+export interface SceneDurationPlan {
+  targetDurationSec: number;
+  /** Suggested scene count for UI / draft persistence. */
+  sceneCountHint: number;
+  sceneCountMin: number;
+  sceneCountMax: number;
+  typicalBeatSec: number;
+}
+
+/**
+ * Estimate how many narrative scenes fit a target length.
+ * Does NOT lock every scene to a fixed 8s — beats vary with content.
+ */
+export function planScenesFromDuration(
+  targetDurationSec: number,
+  _legacyDurationPerScene?: number
+): SceneDurationPlan & { sceneCount: number; durationPerScene: number } {
+  const target = Math.max(MIN_NARRATIVE_BEAT_SEC, Math.round(targetDurationSec));
+  const sceneCountHint = Math.max(1, Math.round(target / TYPICAL_NARRATIVE_BEAT_SEC));
+  const sceneCountMin = Math.max(1, Math.round(target / MAX_NARRATIVE_BEAT_SEC));
+  const sceneCountMax = Math.max(
+    sceneCountHint,
+    Math.round(target / MIN_NARRATIVE_BEAT_SEC)
+  );
+  return {
+    targetDurationSec: target,
+    sceneCountHint,
+    sceneCountMin,
+    sceneCountMax,
+    typicalBeatSec: TYPICAL_NARRATIVE_BEAT_SEC,
+    // Back-compat aliases used by older UI/draft code.
+    sceneCount: sceneCountHint,
+    durationPerScene: TYPICAL_NARRATIVE_BEAT_SEC,
+  };
+}
+
+export function countSpokenWords(text: string): number {
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+/** Natural speech pacing ≈ 2.5 words/sec. */
+export function estimateSpokenSeconds(text: string, fallback = 6): number {
+  const words = countSpokenWords(text);
+  if (!words) return fallback;
+  return Math.max(2, words / WORDS_PER_SECOND);
+}
+
+export interface SceneDurationInput {
+  narration_segment?: string;
+  duration_hint?: number;
+}
+
+/**
+ * Blend AI duration hints with narration length, then scale so the sum
+ * matches the user target. Individual scenes may exceed the model shot
+ * limit — `planSceneChunks` handles extend / multi-cut at generate time.
+ */
+export function normalizeSceneDurations<T extends SceneDurationInput>(
+  scenes: T[],
+  targetDurationSec: number
+): Array<T & { duration_hint: number }> {
+  if (!scenes.length) return [];
+
+  const target = Math.max(scenes.length * 2, Math.round(targetDurationSec));
+  const weights = scenes.map((scene) => {
+    const fromWords = estimateSpokenSeconds(scene.narration_segment || '', 0);
+    const fromHint = Number(scene.duration_hint);
+    const hint = Number.isFinite(fromHint) && fromHint > 0 ? fromHint : 0;
+    if (fromWords > 0 && hint > 0) return Math.max(2, fromWords * 0.65 + hint * 0.35);
+    if (fromWords > 0) return Math.max(2, fromWords);
+    if (hint > 0) return Math.max(2, hint);
+    return TYPICAL_NARRATIVE_BEAT_SEC;
+  });
+
+  const weightSum = weights.reduce((sum, value) => sum + value, 0) || scenes.length;
+  const assigned = scenes.map((scene, index) => {
+    const raw = (weights[index] / weightSum) * target;
+    const duration = Math.min(
+      MAX_SCENE_DURATION_SEC,
+      Math.max(2, Math.round(raw * 10) / 10)
+    );
+    return { ...scene, duration_hint: duration };
+  });
+
+  const sum = assigned.reduce((total, scene) => total + scene.duration_hint, 0);
+  const drift = Math.round((target - sum) * 10) / 10;
+  const last = assigned[assigned.length - 1];
+  last.duration_hint = Math.min(
+    MAX_SCENE_DURATION_SEC,
+    Math.max(2, Math.round((last.duration_hint + drift) * 10) / 10)
+  );
+
+  return assigned;
+}
+
+export function formatDurationLabel(totalSeconds: number): string {
+  const sec = Math.max(0, Math.round(totalSeconds));
+  if (sec < 60) return `${sec}s`;
+  const minutes = Math.floor(sec / 60);
+  const rem = sec % 60;
+  return rem ? `${minutes} phút ${rem}s` : `${minutes} phút`;
+}

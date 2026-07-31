@@ -11,11 +11,31 @@ import type {
   ScriptDraft,
   VideoFamily,
 } from '../../shared/types';
+import {
+  formatDurationLabel,
+  maxSingleShotDuration,
+  planScenesFromDuration,
+} from '../../shared/models';
 import ModelPicker from '../components/ModelPicker';
 import JobProgressView from '../components/JobProgress';
 import Timeline from '../components/Timeline';
 import ExportDialog, { buildExportableScenes } from '../components/ExportDialog';
 import GenerateScenesDialog from '../components/GenerateScenesDialog';
+
+const DURATION_PRESETS_MIN = [0.5, 1, 2, 3, 5] as const;
+const DEFAULT_DURATION_MIN = 1;
+
+function minutesFromSeconds(totalSec: unknown, fallback = DEFAULT_DURATION_MIN): number {
+  const sec = Number(totalSec);
+  if (!Number.isFinite(sec) || sec <= 0) return fallback;
+  return Math.max(0.5, Math.round((sec / 60) * 2) / 2);
+}
+
+function sanitizeDurationMinutes(value: unknown, fallback = DEFAULT_DURATION_MIN): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return n;
+}
 
 type Tool = 'ai' | 'script' | 'media' | 'audio' | 'text';
 
@@ -62,7 +82,8 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
   const [brief, setBrief] = useState('');
   const [stylePrompt, setStylePrompt] = useState('');
   const [language, setLanguage] = useState('Tiếng Việt');
-  const [sceneCount, setSceneCount] = useState(3);
+  /** Free-text minutes; may be empty while typing. */
+  const [durationInput, setDurationInput] = useState(String(DEFAULT_DURATION_MIN));
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [resolution, setResolution] = useState('720p');
   const [mode, setMode] = useState('');
@@ -98,6 +119,48 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
     () => models.find((item) => item.id === modelId),
     [models, modelId]
   );
+  const maxShotSec = useMemo(
+    () => maxSingleShotDuration(modelId),
+    [modelId]
+  );
+  const targetDurationMin = useMemo(() => {
+    if (durationInput === '' || durationInput === '.' || durationInput === ',') {
+      return DEFAULT_DURATION_MIN;
+    }
+    return sanitizeDurationMinutes(
+      String(durationInput).replace(',', '.'),
+      DEFAULT_DURATION_MIN
+    );
+  }, [durationInput]);
+  const scenePlan = useMemo(
+    () => planScenesFromDuration(targetDurationMin * 60),
+    [targetDurationMin]
+  );
+  const setTargetDurationMin = (minutes: number) => {
+    setDurationInput(String(sanitizeDurationMinutes(minutes)));
+  };
+  const onDurationInputChange = (raw: string) => {
+    // Allow empty / intermediate values while typing (e.g. "", "0", "12.")
+    if (raw === '' || raw === '.' || raw === ',') {
+      setDurationInput('');
+      return;
+    }
+    if (!/^\d*[.,]?\d*$/.test(raw)) return;
+    setDurationInput(raw);
+  };
+  const onDurationInputBlur = () => {
+    const parsed = sanitizeDurationMinutes(
+      String(durationInput).replace(',', '.'),
+      0.5
+    );
+    setDurationInput(String(parsed));
+  };
+  // Recover if an older draft path wrote "NaN" into the field.
+  useEffect(() => {
+    if (/^nan$/i.test(durationInput.trim())) {
+      setDurationInput(String(DEFAULT_DURATION_MIN));
+    }
+  }, [durationInput]);
   const currentScene = script?.scenes[selectedScene] ?? null;
   const currentAsset =
     sceneMedia.find((asset) => asset.sceneId === currentScene?.id) ??
@@ -256,7 +319,7 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
         if (draft) {
           setBrief(draft.brief);
           setLanguage(draft.language);
-          setSceneCount(draft.sceneCount);
+          setTargetDurationMin(minutesFromSeconds(draft.targetDurationSec));
           setMediaKind(draft.mediaKind ?? 'video');
           setFamily(draft.family);
           setModelId(draft.model);
@@ -331,7 +394,8 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
   const draftPayload = (nextScript: ScriptDraft | null = script) => ({
     brief,
     language,
-    sceneCount,
+    sceneCount: nextScript?.scenes.length ?? scenePlan.sceneCountHint,
+    targetDurationSec: scenePlan.targetDurationSec,
     family: family as VideoFamily | ImageFamily,
     model: modelId,
     aspectRatio,
@@ -353,7 +417,8 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
       name,
       brief,
       language,
-      sceneCount,
+      sceneCount: scenePlan.sceneCountHint,
+      targetDurationSec: scenePlan.targetDurationSec,
       family: family as VideoFamily | ImageFamily,
       model: modelId,
       aspectRatio,
@@ -432,7 +497,12 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
       setSceneMedia(refreshed.sceneMedia);
       if (refreshed.draft?.script) {
         setScript(refreshed.draft.script);
-        setSceneCount(refreshed.draft.script.scenes.length);
+        const totalSec =
+          refreshed.draft.targetDurationSec ||
+          refreshed.draft.script.scenes.reduce((sum, scene) => sum + scene.duration_hint, 0);
+        if (totalSec > 0) {
+          setTargetDurationMin(minutesFromSeconds(totalSec));
+        }
       }
       setPreviewMode('final');
       setPreviewKey((value) => value + 1);
@@ -577,12 +647,12 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
       const draft = await window.studio.generateScript({
         brief: brief.trim(),
         language,
-        sceneCount,
+        targetDurationSec: scenePlan.targetDurationSec,
         family: family as VideoFamily | ImageFamily,
         model: modelId,
         aspectRatio,
         resolution,
-        durationPerScene: selectedModel?.defaultDuration,
+        maxShotSec,
         mediaKind,
         stylePrompt: stylePrompt.trim() || undefined,
       });
@@ -643,7 +713,12 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
       setSceneMedia(refreshed.sceneMedia);
       if (refreshed.draft?.script) {
         setScript(refreshed.draft.script);
-        setSceneCount(refreshed.draft.script.scenes.length);
+        const totalSec =
+          refreshed.draft.targetDurationSec ||
+          refreshed.draft.script.scenes.reduce((sum, scene) => sum + scene.duration_hint, 0);
+        if (totalSec > 0) {
+          setTargetDurationMin(minutesFromSeconds(totalSec));
+        }
       }
       setPreviewMode('scene');
       setPreviewKey((value) => value + 1);
@@ -711,33 +786,58 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
               placeholder="Warm film look, soft light, consistent character..."
             />
           </div>
-          <div className="field-row">
-            <div className="field compact-field">
-              <label htmlFor="language">Language</label>
-              <input
-                id="language"
-                value={language}
-                onChange={(event) => setLanguage(event.target.value)}
-              />
+          <div className="field compact-field">
+            <label htmlFor="language">Language</label>
+            <input
+              id="language"
+              value={language}
+              onChange={(event) => setLanguage(event.target.value)}
+            />
+          </div>
+          <div className="field compact-field duration-field">
+            <div className="duration-field-head">
+              <label htmlFor="target-duration">Thời lượng video</label>
+              <span className="duration-field-live">
+                {formatDurationLabel(scenePlan.targetDurationSec)} · ≈{scenePlan.sceneCountHint} scene
+              </span>
             </div>
-            <div className="field compact-field short-field">
-              <label htmlFor="scene-count">Scenes</label>
-              <input
-                id="scene-count"
-                type="number"
-                min={1}
-                value={sceneCount}
-                onChange={(event) =>
-                  setSceneCount(Math.max(1, Number(event.target.value) || 1))
-                }
-              />
+            <div className="duration-presets" role="group" aria-label="Preset thời lượng">
+              {DURATION_PRESETS_MIN.map((minutes) => (
+                <button
+                  key={minutes}
+                  type="button"
+                  className={`chip-btn ${
+                    Math.abs(targetDurationMin - minutes) < 0.001 && durationInput !== ''
+                      ? 'active'
+                      : ''
+                  }`}
+                  onClick={() => setTargetDurationMin(minutes)}
+                >
+                  {minutes < 1 ? '30s' : `${minutes}p`}
+                </button>
+              ))}
+            </div>
+            <div className="duration-custom">
+              <div className="duration-input-wrap">
+                <input
+                  id="target-duration"
+                  type="text"
+                  inputMode="decimal"
+                  value={durationInput}
+                  onChange={(event) => onDurationInputChange(event.target.value)}
+                  onBlur={onDurationInputBlur}
+                  placeholder="1"
+                  aria-describedby="duration-hint"
+                />
+                <span className="duration-unit">phút</span>
+              </div>
+              <p id="duration-hint" className="hint duration-hint">
+                Scene tự chia theo nội dung
+                {mediaKind === 'video' ? ` · >${maxShotSec}s dùng Extend` : ''}.
+                {scenePlan.sceneCountHint > 12 ? ' Chi phí tăng khi nhiều scene.' : ''}
+              </p>
             </div>
           </div>
-          {sceneCount > 12 && (
-            <p className="hint">
-              Nhiều scene hơn → chi phí Snapgen + TTS tăng tương ứng. Mỗi scene là một clip riêng.
-            </p>
-          )}
           <ModelPicker
             mediaKind={mediaKind}
             families={families}
@@ -1112,13 +1212,13 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
                     <input
                       type="number"
                       min={1}
-                      max={60}
+                      max={180}
                       step={0.1}
                       value={Number(currentScene.duration_hint.toFixed(1))}
                       onChange={(event) =>
                         updateScene({
                           duration_hint: Math.min(
-                            60,
+                            180,
                             Math.max(1, Number(event.target.value) || 1)
                           ),
                         })
@@ -1128,13 +1228,15 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
                   </div>
                 </div>
                 <p className="hint">
-                  Thời lượng bám theo đoạn lời thoại của scene. Sửa Narration rồi tạo lại
-                  voiceover để đổi độ dài.
+                  Thời lượng tính theo nội dung lời thoại và tổng video. Sửa Narration rồi
+                  tạo lại voiceover để khớp độ dài thực tế.
                 </p>
                 {selectedModel &&
                   currentScene.duration_hint > Math.max(...selectedModel.durations) && (
                     <p className="hint">
-                      Cảnh dài → extend trong cảnh này. Cảnh kế tiếp vẫn gen mới (hard cut).
+                      Cảnh dài hơn giới hạn model ({Math.max(...selectedModel.durations)}s) →
+                      hệ thống auto-extend / chia đoạn trong cảnh này. Cảnh kế tiếp vẫn gen
+                      mới (hard cut).
                     </p>
                   )}
               </div>
