@@ -31,6 +31,12 @@ import ProjectVoicePanel from '../components/ProjectVoicePanel';
 import type { ProjectVoiceSettings } from '../../shared/types';
 import { OPENAI_CHAT_MODELS } from '../../shared/types';
 import { DEFAULT_PROJECT_VOICE, resolveProjectChatModel, resolveProjectVoice } from '../../shared/voice';
+import {
+  canonicalAspectRatio,
+  formatOutputFormatLabel,
+  inferOutputFormatId,
+  type OutputFormatId,
+} from '../../shared/output-format';
 
 const DURATION_PRESETS_MIN = [0.5, 1, 2, 3, 5, 10, 15] as const;
 const DEFAULT_DURATION_MIN = 1;
@@ -95,6 +101,7 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
   /** Free-text minutes; may be empty while typing. */
   const [durationInput, setDurationInput] = useState(String(DEFAULT_DURATION_MIN));
   const [aspectRatio, setAspectRatio] = useState('16:9');
+  const [outputFormat, setOutputFormat] = useState<OutputFormatId>('youtube');
   const [resolution, setResolution] = useState('720p');
   const [mode, setMode] = useState('');
   const [script, setScript] = useState<ScriptDraft | null>(null);
@@ -387,6 +394,7 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
           setFamily(draft.family);
           setModelId(resolveModelId(draft.model));
           setAspectRatio(draft.aspectRatio);
+          setOutputFormat(inferOutputFormatId(draft.aspectRatio, draft.outputFormat));
           setResolution(draft.resolution);
           setMode(draft.mode ?? '');
           setStylePrompt(draft.stylePrompt ?? '');
@@ -444,6 +452,7 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
       if (selected) {
         setFamily(selected.family);
         setAspectRatio(selected.defaultAspectRatio);
+        setOutputFormat(inferOutputFormatId(selected.defaultAspectRatio));
         setResolution(selected.defaultResolution);
       }
       return;
@@ -455,6 +464,7 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
         setModelId(fallback.id);
         setFamily(fallback.family);
         setAspectRatio(fallback.defaultAspectRatio);
+        setOutputFormat(inferOutputFormatId(fallback.defaultAspectRatio));
         setResolution(fallback.defaultResolution);
       }
     }
@@ -474,6 +484,7 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
       setFamily(preferred.family);
       setModelId(preferred.id);
       setAspectRatio(preferred.defaultAspectRatio);
+      setOutputFormat(inferOutputFormatId(preferred.defaultAspectRatio));
       setResolution(preferred.defaultResolution);
       setMode(preferred.extraFields?.mode?.[0] ?? '');
       return;
@@ -481,6 +492,7 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
     setFamily(preferredFamily);
     setModelId(preferredId);
     setAspectRatio('16:9');
+    setOutputFormat('youtube');
     setResolution(kind === 'image' ? '1K' : '720p');
     setMode('');
   };
@@ -491,15 +503,21 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
     if (!first) return;
     setModelId(first.id);
     setAspectRatio(first.defaultAspectRatio);
+    setOutputFormat(inferOutputFormatId(first.defaultAspectRatio));
     setResolution(first.defaultResolution);
     setMode(first.extraFields?.mode?.[0] ?? '');
+  };
+
+  const applyAspectRatio = (next: string, formatHint?: string | null) => {
+    setAspectRatio(next);
+    setOutputFormat(inferOutputFormatId(next, formatHint ?? outputFormat));
   };
 
   const onModelChange = (id: string) => {
     setModelId(id);
     const selected = models.find((item) => item.id === id);
     if (!selected) return;
-    setAspectRatio(selected.defaultAspectRatio);
+    applyAspectRatio(selected.defaultAspectRatio);
     setResolution(selected.defaultResolution);
     setMode(selected.extraFields?.mode?.[0] ?? '');
   };
@@ -515,6 +533,7 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
     family: family as VideoFamily | ImageFamily,
     model: modelId,
     aspectRatio,
+    outputFormat,
     resolution,
     mode: mode || undefined,
     script: nextScript,
@@ -1063,11 +1082,13 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
             family={family}
             modelId={modelId}
             aspectRatio={aspectRatio}
+            outputFormat={outputFormat}
             resolution={resolution}
             mode={mode}
             onFamilyChange={onFamilyChange}
             onModelChange={onModelChange}
-            onAspectRatioChange={setAspectRatio}
+            onAspectRatioChange={(v) => applyAspectRatio(v, outputFormat)}
+            onOutputFormatChange={setOutputFormat}
             onResolutionChange={setResolution}
             onModeChange={setMode}
           />
@@ -1426,13 +1447,21 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
               </button>
             </div>
             <div>
-              <button type="button" className="viewer-chip">{aspectRatio}</button>
+              <button
+                type="button"
+                className="viewer-chip"
+                title={aspectRatio}
+              >
+                {formatOutputFormatLabel(outputFormat, aspectRatio)}
+              </button>
               <button type="button" className="viewer-chip">Fit</button>
               <button type="button" className="icon-button">•••</button>
             </div>
           </div>
           <div className="viewer-stage">
-            <div className={`preview-canvas ratio-${aspectRatio.replace(':', '-')}`}>
+            <div
+              className={`preview-canvas ratio-${canonicalAspectRatio(aspectRatio).replace(':', '-')}`}
+            >
               {previewMode === 'scene' && currentAsset?.exists && currentAsset.kind === 'video' ? (
                 <video
                   key={`${currentAsset.path}-${selectedScene}-${previewKey}`}

@@ -154,6 +154,9 @@ async function prepareNarration(options: {
   ttsProvider: 'openai' | 'elevenlabs';
   elevenLabsVoiceId?: string;
   elevenLabsModelId?: string;
+  elevenLabsPublicOwnerId?: string;
+  elevenLabsOriginalVoiceId?: string;
+  elevenLabsVoiceName?: string;
   /** Khớp video theo độ dài speech thật (sau khi audio đã đạt ±3% mục tiêu). */
   syncToSpeech?: boolean;
 }): Promise<NarrationBundle> {
@@ -200,6 +203,9 @@ async function prepareNarration(options: {
       language: options.language,
       outDir: projectDir,
       fileName: RAW_NARRATION_FILE,
+      publicOwnerId: options.elevenLabsPublicOwnerId,
+      originalVoiceId: options.elevenLabsOriginalVoiceId,
+      voiceName: options.elevenLabsVoiceName,
     });
     if (synthesized.srtPath !== srtPath && fs.existsSync(synthesized.srtPath)) {
       fs.copyFileSync(synthesized.srtPath, srtPath);
@@ -302,6 +308,9 @@ async function prepareNarrationFittingTarget(options: {
   ttsProvider: 'openai' | 'elevenlabs';
   elevenLabsVoiceId?: string;
   elevenLabsModelId?: string;
+  elevenLabsPublicOwnerId?: string;
+  elevenLabsOriginalVoiceId?: string;
+  elevenLabsVoiceName?: string;
   targetDurationSec: number;
 }): Promise<NarrationBundle> {
   const target = Math.max(1, options.targetDurationSec);
@@ -336,6 +345,9 @@ async function prepareNarrationFittingTarget(options: {
       ttsProvider: options.ttsProvider,
       elevenLabsVoiceId: options.elevenLabsVoiceId,
       elevenLabsModelId: options.elevenLabsModelId,
+      elevenLabsPublicOwnerId: options.elevenLabsPublicOwnerId,
+      elevenLabsOriginalVoiceId: options.elevenLabsOriginalVoiceId,
+      elevenLabsVoiceName: options.elevenLabsVoiceName,
       syncToSpeech: false,
     });
 
@@ -371,6 +383,9 @@ async function prepareNarrationFittingTarget(options: {
         ttsProvider: options.ttsProvider,
         elevenLabsVoiceId: options.elevenLabsVoiceId,
         elevenLabsModelId: options.elevenLabsModelId,
+        elevenLabsPublicOwnerId: options.elevenLabsPublicOwnerId,
+        elevenLabsOriginalVoiceId: options.elevenLabsOriginalVoiceId,
+        elevenLabsVoiceName: options.elevenLabsVoiceName,
         syncToSpeech: true,
       });
       emitProgress({
@@ -434,6 +449,8 @@ export async function remuxProject(projectId: string): Promise<GenerateJobResult
   const keys = getKeys();
   const mediaKind = draft.mediaKind || 'video';
   const voice = resolveProjectVoice(draft, settings);
+  // Khóa giọng suốt remux — failover API key không được đổi voiceId.
+  const lockedElevenLabsVoiceId = voice.elevenLabsVoiceId;
 
   emitProgress({ phase: 'merge', message: 'Đang ghép lại theo timeline đã chỉnh...', percent: 80 });
   updateProjectStatus(projectId, 'generating');
@@ -461,8 +478,11 @@ export async function remuxProject(projectId: string): Promise<GenerateJobResult
         language: draft.language,
         refresh: false,
         ttsProvider: voice.ttsProvider,
-        elevenLabsVoiceId: voice.elevenLabsVoiceId,
+        elevenLabsVoiceId: lockedElevenLabsVoiceId,
         elevenLabsModelId: voice.elevenLabsModelId,
+        elevenLabsPublicOwnerId: voice.elevenLabsPublicOwnerId,
+        elevenLabsOriginalVoiceId: voice.elevenLabsOriginalVoiceId,
+        elevenLabsVoiceName: voice.elevenLabsVoiceName,
       });
       audioPath = rebuilt.audioPath;
       srtPath = rebuilt.srtPath;
@@ -530,6 +550,8 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
   const settings = getSettings();
   const mediaKind = input.mediaKind || 'video';
   const voice = resolveProjectVoice(input, settings);
+  // Khóa giọng từ lúc bắt đầu job → hết token chỉ đổi API key, không đổi giọng đến khi xong.
+  const lockedElevenLabsVoiceId = voice.elevenLabsVoiceId;
 
   if (!keys.snapgenApiKey) throw new Error('Thiếu Snapgen API key. Vào Settings để cấu hình.');
   if (voice.ttsProvider === 'openai' && !keys.openaiApiKey) {
@@ -628,8 +650,11 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
           ttsModel: voice.openaiTtsModel,
           language: input.language,
           ttsProvider: voice.ttsProvider,
-          elevenLabsVoiceId: voice.elevenLabsVoiceId,
+          elevenLabsVoiceId: lockedElevenLabsVoiceId,
           elevenLabsModelId: voice.elevenLabsModelId,
+          elevenLabsPublicOwnerId: voice.elevenLabsPublicOwnerId,
+          elevenLabsOriginalVoiceId: voice.elevenLabsOriginalVoiceId,
+          elevenLabsVoiceName: voice.elevenLabsVoiceName,
           targetDurationSec: targetRuntimeSec,
         })
       : await prepareNarration({
@@ -642,8 +667,11 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
           language: input.language,
           refresh: false,
           ttsProvider: voice.ttsProvider,
-          elevenLabsVoiceId: voice.elevenLabsVoiceId,
+          elevenLabsVoiceId: lockedElevenLabsVoiceId,
           elevenLabsModelId: voice.elevenLabsModelId,
+          elevenLabsPublicOwnerId: voice.elevenLabsPublicOwnerId,
+          elevenLabsOriginalVoiceId: voice.elevenLabsOriginalVoiceId,
+          elevenLabsVoiceName: voice.elevenLabsVoiceName,
           syncToSpeech: true,
         });
     const audioPath = narration.audioPath;

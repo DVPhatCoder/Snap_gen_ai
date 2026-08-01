@@ -2983,3 +2983,159 @@ h2 {
   color: var(--muted);
   font-size: 11px;
 }
+
+.el-keys-panel {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line, #2a2e38);
+}
+
+.el-keys-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.el-keys-head h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.el-keys-add {
+  display: grid;
+  grid-template-columns: 140px 1fr auto;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.el-keys-add input,
+.el-key-edit input {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: none;
+  color: var(--text);
+  background: #0e1014;
+  caret-color: var(--accent);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.el-keys-add input::placeholder,
+.el-key-edit input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+.el-keys-add input:focus,
+.el-key-edit input:focus {
+  border-color: rgba(37, 224, 208, 0.72);
+  box-shadow: 0 0 0 2px rgba(37, 224, 208, 0.1);
+}
+
+.el-keys-add input:disabled,
+.el-key-edit input:disabled {
+  opacity: 0.55;
+}
+
+.el-keys-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.el-keys-empty {
+  padding: 12px;
+  border: 1px dashed #3a3e48;
+  border-radius: 8px;
+  color: var(--muted, #9aa0ad);
+  font-size: 13px;
+}
+
+.el-key-card {
+  padding: 12px;
+  border: 1px solid #2f3340;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.el-key-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.el-key-masked {
+  margin: 4px 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: #b7bdc9;
+}
+
+.el-key-badges {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.el-key-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.el-key-status.status-ready { color: #c5c9d3; background: #3a3e48; }
+.el-key-status.status-active { color: #0d2a16; background: #8fd19e; }
+.el-key-status.status-busy { color: #0b1e3a; background: #9ec1ff; }
+.el-key-status.status-exhausted { color: #3a2200; background: #e6a35a; }
+.el-key-status.status-rate_limited { color: #3a2200; background: #e6c07b; }
+.el-key-status.status-invalid { color: #3a0d0d; background: #f0a0a0; }
+.el-key-status.status-disabled { color: #888; background: #2a2a2a; }
+
+.el-key-priority {
+  font-size: 11px;
+  color: var(--muted, #9aa0ad);
+}
+
+.el-key-actions,
+.el-key-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.el-key-edit input {
+  min-width: 160px;
+  flex: 1;
+}
+
+.btn.ghost.danger {
+  color: #f0a0a0;
+}
+
+@media (max-width: 720px) {
+  .el-keys-add {
+    grid-template-columns: 1fr;
+  }
+}
+
+.el-voice-library-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--muted, #9aa0ad);
+  cursor: pointer;
+}

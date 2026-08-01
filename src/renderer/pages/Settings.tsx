@@ -9,6 +9,7 @@ import type {
 import { ELEVENLABS_TTS_MODELS, OPENAI_CHAT_MODELS, OPENAI_TTS_MODELS, OPENAI_TTS_VOICES } from '../../shared/types';
 import UsageQuotaPanel from '../components/UsageQuotaPanel';
 import UsageHistoryPanel from '../components/UsageHistoryPanel';
+import ElevenLabsApiKeysPanel from '../components/ElevenLabsApiKeysPanel';
 
 export default function Settings() {
   const [keys, setKeys] = useState<ApiKeys>({
@@ -29,7 +30,6 @@ export default function Settings() {
     loggedIn: false,
     cookieCount: 0,
   });
-  const [elevenLabsApiKeyInput, setElevenLabsApiKeyInput] = useState('');
   const [voicesLoaded, setVoicesLoaded] = useState(false);
   const [usage, setUsage] = useState<UsageSnapshot | null>(null);
   const [usageBusy, setUsageBusy] = useState(false);
@@ -81,12 +81,6 @@ export default function Settings() {
     try {
       const list = await window.studio.listElevenLabsVoices();
       setVoicesLoaded(true);
-      setSettings((prev) => {
-        if (list.length && !list.some((v) => v.voiceId === prev.elevenLabsVoiceId)) {
-          return { ...prev, elevenLabsVoiceId: list[0].voiceId };
-        }
-        return prev;
-      });
       setMsg({ type: 'ok', text: `Đã tải ${list.length} giọng ElevenLabs (chọn trong dự án → Giọng đọc).` });
     } catch (err) {
       setVoicesLoaded(false);
@@ -194,11 +188,10 @@ export default function Settings() {
       const status = await window.studio.clearElevenLabsSession();
       setElevenLabs(status);
       setVoicesLoaded(false);
-      setElevenLabsApiKeyInput('');
       if (settings.ttsProvider === 'elevenlabs') {
         setSettings((prev) => ({ ...prev, ttsProvider: 'openai' }));
       }
-      setMsg({ type: 'ok', text: 'Đã xóa cookies/session ElevenLabs trên máy.' });
+      setMsg({ type: 'ok', text: 'Đã xóa cookies/session ElevenLabs trên máy (danh sách API Keys vẫn giữ).' });
     } catch (err) {
       setMsg({ type: 'error', text: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -214,27 +207,7 @@ export default function Settings() {
       setElevenLabs(status);
       setMsg({
         type: 'ok',
-        text: 'Đã mở trang API Keys. Bấm Create Key (free), copy key, rồi dán vào ô bên dưới.',
-      });
-    } catch (err) {
-      setMsg({ type: 'error', text: err instanceof Error ? err.message : String(err) });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const saveApiKeyManual = async () => {
-    setBusy(true);
-    setMsg(null);
-    try {
-      const status = await window.studio.saveElevenLabsApiKey(elevenLabsApiKeyInput);
-      setElevenLabs(status);
-      setElevenLabsApiKeyInput('');
-      setSettings((prev) => ({ ...prev, ttsProvider: 'elevenlabs' }));
-      await loadVoices(true);
-      setMsg({
-        type: 'ok',
-        text: `Đã lưu API key ElevenLabs${status.email ? ` (${status.email})` : ''}. Có thể chọn giọng bên dưới.`,
+        text: 'Đã mở trang API Keys. Bấm Create Key (free), copy key, rồi thêm vào danh sách bên dưới.',
       });
     } catch (err) {
       setMsg({ type: 'error', text: err instanceof Error ? err.message : String(err) });
@@ -367,30 +340,12 @@ export default function Settings() {
           </div>
         </div>
 
-        <div className="field" style={{ marginTop: 14 }}>
-          <label htmlFor="el-api-key">Dán API key free</label>
-          <input
-            id="el-api-key"
-            type="password"
-            value={elevenLabsApiKeyInput}
-            onChange={(e) => setElevenLabsApiKeyInput(e.target.value)}
-            placeholder="sk_... hoặc xi_... (từ Developers → API Keys)"
-            autoComplete="off"
-          />
-          <p className="hint">
-            Key chỉ lưu encrypted trên máy bạn. Free tier vẫn dùng được — không cần gói trả phí.
-          </p>
-        </div>
-        <div className="row-actions" style={{ marginTop: 8 }}>
-          <button
-            type="button"
-            className="btn primary"
-            disabled={busy || !elevenLabsApiKeyInput.trim()}
-            onClick={() => void saveApiKeyManual()}
-          >
-            Lưu API key
-          </button>
-        </div>
+        <ElevenLabsApiKeysPanel
+          disabled={busy}
+          onChanged={() => {
+            void window.studio.getElevenLabsSession().then(setElevenLabs);
+          }}
+        />
       </section>
 
       <section className="settings-block">

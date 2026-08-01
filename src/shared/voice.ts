@@ -59,5 +59,10 @@ export function resolveProjectVoice(
     openaiTtsVoice: partial!.openaiTtsVoice || base.openaiTtsVoice,
     elevenLabsVoiceId: partial!.elevenLabsVoiceId || base.elevenLabsVoiceId,
     elevenLabsModelId: partial!.elevenLabsModelId || base.elevenLabsModelId,
+    elevenLabsPublicOwnerId:
+      partial!.elevenLabsPublicOwnerId?.trim() || undefined,
+    elevenLabsOriginalVoiceId:
+      partial!.elevenLabsOriginalVoiceId?.trim() || undefined,
+    elevenLabsVoiceName: partial!.elevenLabsVoiceName?.trim() || undefined,
   };
 }

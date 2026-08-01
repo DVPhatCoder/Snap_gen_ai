@@ -27,6 +27,7 @@ import type {
   UsageSnapshot,
   VideoFamily,
 } from '../shared/types';
+import type { ProviderApiKeyPublic } from '../shared/provider-api-keys';
 
 const api = {
   getKeys: (): Promise<ApiKeys> => ipcRenderer.invoke(IPC.getKeys),
@@ -56,6 +57,28 @@ const api = {
     ipcRenderer.invoke(IPC.elevenLabsOpenApiKeys),
   saveElevenLabsApiKey: (apiKey: string): Promise<ElevenLabsSessionStatus> =>
     ipcRenderer.invoke(IPC.elevenLabsSaveApiKey, apiKey),
+  listElevenLabsApiKeys: (): Promise<ProviderApiKeyPublic[]> =>
+    ipcRenderer.invoke(IPC.elevenLabsListApiKeys),
+  addElevenLabsApiKey: (input: {
+    apiKey: string;
+    name?: string;
+  }): Promise<ProviderApiKeyPublic[]> => ipcRenderer.invoke(IPC.elevenLabsAddApiKey, input),
+  updateElevenLabsApiKey: (input: {
+    id: string;
+    name?: string;
+    apiKey?: string;
+    enabled?: boolean;
+  }): Promise<ProviderApiKeyPublic[]> => ipcRenderer.invoke(IPC.elevenLabsUpdateApiKey, input),
+  deleteElevenLabsApiKey: (id: string): Promise<ProviderApiKeyPublic[]> =>
+    ipcRenderer.invoke(IPC.elevenLabsDeleteApiKey, id),
+  moveElevenLabsApiKey: (input: {
+    id: string;
+    direction: 'up' | 'down';
+  }): Promise<ProviderApiKeyPublic[]> => ipcRenderer.invoke(IPC.elevenLabsMoveApiKey, input),
+  resetElevenLabsApiKeyStatus: (id: string): Promise<ProviderApiKeyPublic[]> =>
+    ipcRenderer.invoke(IPC.elevenLabsResetApiKeyStatus, id),
+  testElevenLabsApiKey: (id: string): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke(IPC.elevenLabsTestApiKey, id),
   getElevenLabsSession: (): Promise<ElevenLabsSessionStatus> =>
     ipcRenderer.invoke(IPC.elevenLabsGetSession),
   clearElevenLabsSession: (): Promise<ElevenLabsSessionStatus> =>

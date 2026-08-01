@@ -4,6 +4,17 @@ import path from 'node:path';
 import type { ElevenLabsVoice } from '../../shared/types';
 import type { TranscriptWord } from './openai-audio';
 import { elevenLabsFetch, getElevenLabsSessionStatus } from './elevenlabs-auth';
+import {
+  ElevenLabsKeyManager,
+  formatElevenLabsKeysUnavailableError,
+} from './api-keys/elevenlabs-key-manager';
+import {
+  elevenLabsFetchWithKey,
+  ensureLibraryVoiceOnApiKey,
+  fetchVoiceShareMeta,
+  searchLibraryShareMeta,
+  type VoiceShareMeta,
+} from './elevenlabs-voice-share';
 
 const DEFAULT_VOICE_ID = '21m00Tcm4TlvDq8ikWAM'; // Rachel (premade — Free API OK)
 
@@ -11,31 +22,7 @@ export function isElevenLabsLibraryVoice(category?: string): boolean {
   return (category || '').toLowerCase() === 'library';
 }
 
-/** Free/Starter API không TTS được Voice Library — ưu tiên premade. */
-export function pickApiSafeElevenLabsVoiceId(
-  voices: ElevenLabsVoice[],
-  requestedId?: string
-): string {
-  const requested = (requestedId || '').trim();
-  if (requested) {
-    const hit = voices.find((v) => v.voiceId === requested);
-    if (hit && !isElevenLabsLibraryVoice(hit.category)) return hit.voiceId;
-    // Id không có trong list (hoặc là library) → không dùng.
-  }
-  const premade = voices.find((v) => (v.category || '').toLowerCase() === 'premade');
-  if (premade) return premade.voiceId;
-  const owned = voices.find(
-    (v) =>
-      !isElevenLabsLibraryVoice(v.category) &&
-      ['cloned', 'generated', 'professional', 'high_quality'].includes(
-        (v.category || '').toLowerCase()
-      )
-  );
-  if (owned) return owned.voiceId;
-  const anySafe = voices.find((v) => !isElevenLabsLibraryVoice(v.category));
-  if (anySafe) return anySafe.voiceId;
-  return DEFAULT_VOICE_ID;
-}const DEFAULT_MODEL_ID = 'eleven_multilingual_v2';
+const DEFAULT_MODEL_ID = 'eleven_multilingual_v2';
 
 interface AlignmentPayload {
   characters?: string[];
@@ -195,6 +182,10 @@ export async function listElevenLabsVoices(): Promise<ElevenLabsVoice[]> {
       preview_url?: string;
       category?: string;
       labels?: Record<string, string>;
+      sharing?: {
+        public_owner_id?: string;
+        original_voice_id?: string;
+      };
     }>;
     detail?: { message?: string } | string;
   };
@@ -215,6 +206,8 @@ export async function listElevenLabsVoices(): Promise<ElevenLabsVoice[]> {
       previewUrl: v.preview_url,
       category: v.category,
       labels: v.labels,
+      publicOwnerId: v.sharing?.public_owner_id || undefined,
+      originalVoiceId: v.sharing?.original_voice_id || undefined,
     }))
     .sort((a, b) => {
       const score = (v: ElevenLabsVoice) => {
@@ -238,27 +231,19 @@ export async function synthesizeWithElevenLabs(options: {
   language?: string;
   outDir: string;
   fileName?: string;
+  /** Meta Library — để tự Add sang API key mới khi failover. */
+  publicOwnerId?: string;
+  originalVoiceId?: string;
+  voiceName?: string;
 }): Promise<{ audioPath: string; srtPath: string; words: TranscriptWord[]; modelId: string }> {
   await ensureLoggedIn();
 
   const trimmed = options.text.replace(/\s+/g, ' ').trim();
   if (!trimmed) throw new Error('ElevenLabs TTS: empty text');
 
-  let voiceId = options.voiceId.trim() || DEFAULT_VOICE_ID;
-  // Tránh 402: tự đổi Voice Library → premade trước khi gọi TTS.
-  try {
-    const voices = await listElevenLabsVoices();
-    const safe = pickApiSafeElevenLabsVoiceId(voices, voiceId);
-    if (safe !== voiceId) {
-      console.warn(
-        `[ElevenLabs] Voice ${voiceId} không dùng được qua API Free (thường là Library). ` +
-          `Tự chuyển sang ${safe}.`
-      );
-      voiceId = safe;
-    }
-  } catch {
-    /* giữ voiceId gốc nếu list fail */
-  }
+  // Giọng “logic” user chọn (Library gốc). Mỗi API key có thể có voice_id account khác nhau.
+  const selectedVoiceId = options.voiceId.trim() || DEFAULT_VOICE_ID;
+  const libraryVoiceId = options.originalVoiceId?.trim() || selectedVoiceId;
 
   const languageCode = resolveElevenLabsLanguageCode(options.language);
   const modelId = resolveElevenLabsModelForLanguage(options.modelId, languageCode);
@@ -272,58 +257,147 @@ export async function synthesizeWithElevenLabs(options: {
     body.language_code = languageCode;
   }
 
-  const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=mp3_44100_128`;
-  const res = await elevenLabsFetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  let shareMeta: VoiceShareMeta | null = options.publicOwnerId
+    ? {
+        publicOwnerId: options.publicOwnerId,
+        libraryVoiceId,
+        name: options.voiceName?.trim() || 'SnapGen Voice',
+      }
+    : null;
 
-  const data = (await res.json()) as TtsWithTimestampsResponse;
-  if (!res.ok || !data.audio_base64) {
-    const detail =
-      typeof data.detail === 'string'
-        ? data.detail
-        : data.detail?.message || JSON.stringify(data).slice(0, 300);
+  const tried = new Set<string>();
+  let lastDetail = '';
 
-    // Fallback cứng sang Rachel nếu vẫn 402 library (list voices thiếu category).
-    if (
-      res.status === 402 &&
-      /library voices/i.test(detail) &&
-      voiceId !== DEFAULT_VOICE_ID
-    ) {
-      console.warn(
-        `[ElevenLabs] 402 library voice — retry với premade ${DEFAULT_VOICE_ID}`
+  for (;;) {
+    const record = await ElevenLabsKeyManager.getAvailableKey(tried);
+    if (!record) {
+      throw new Error(
+        formatElevenLabsKeysUnavailableError(
+          lastDetail,
+          `Giọng «${options.voiceName || selectedVoiceId}» vẫn được giữ (không đổi sang giọng khác).`
+        )
       );
-      return synthesizeWithElevenLabs({
-        ...options,
-        voiceId: DEFAULT_VOICE_ID,
+    }
+
+    ElevenLabsKeyManager.markBusy(record.id);
+
+    try {
+      // Bổ sung meta từ key đầu tiên nếu draft chưa có publicOwnerId.
+      if (!shareMeta) {
+        shareMeta =
+          (await fetchVoiceShareMeta(record.apiKey, selectedVoiceId)) ||
+          (await searchLibraryShareMeta(record.apiKey, {
+            voiceId: libraryVoiceId,
+            name: options.voiceName,
+          }));
+      }
+
+      // Library → tự Add vào account của key này nếu chưa có (cùng giọng, có thể khác voice_id).
+      let effectiveVoiceId = selectedVoiceId;
+      if (shareMeta?.publicOwnerId) {
+        const ensured = await ensureLibraryVoiceOnApiKey({
+          apiKey: record.apiKey,
+          apiKeyId: record.id,
+          selectedVoiceId,
+          meta: shareMeta,
+        });
+        effectiveVoiceId = ensured.voiceId;
+        if (ensured.meta) shareMeta = ensured.meta;
+      }
+
+      const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(effectiveVoiceId)}/with-timestamps?output_format=mp3_44100_128`;
+      const res = await elevenLabsFetchWithKey(record.apiKey, url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       });
-    }
+      const data = (await res.json()) as TtsWithTimestampsResponse;
 
-    if (res.status === 402 && /library voices/i.test(detail)) {
-      throw new Error(
-        'ElevenLabs từ chối giọng Voice Library trên gói Free (HTTP 402). ' +
-          'Đổi API key không giúp được — dự án đang dùng giọng Library. ' +
-          'Chọn giọng premade trong tab Giọng đọc, hoặc nâng cấp gói, hoặc dùng OpenAI TTS.'
-      );
+      if (res.ok && data.audio_base64) {
+        ElevenLabsKeyManager.markSuccess(record.id);
+        const audioPath = path.join(options.outDir, options.fileName || 'narration.mp3');
+        fs.writeFileSync(audioPath, Buffer.from(data.audio_base64, 'base64'));
+        const words = alignmentToWords(data.normalized_alignment || data.alignment);
+        const srtPath = path.join(options.outDir, 'subs.srt');
+        fs.writeFileSync(srtPath, wordsToSrt(words), 'utf8');
+        return { audioPath, srtPath, words, modelId };
+      }
+
+      const detail =
+        typeof data.detail === 'string'
+          ? data.detail
+          : data.detail?.message || JSON.stringify(data).slice(0, 300);
+      lastDetail = detail;
+
+      // Giọng thiếu trên key → thử Add rồi TTS lại 1 lần.
+      if (
+        shareMeta?.publicOwnerId &&
+        /voice_not_found|invalid.?voice|unknown voice|does not exist|library voices/i.test(detail)
+      ) {
+        try {
+          const ensured = await ensureLibraryVoiceOnApiKey({
+            apiKey: record.apiKey,
+            apiKeyId: record.id,
+            selectedVoiceId,
+            meta: shareMeta,
+          });
+          const retryUrl = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(ensured.voiceId)}/with-timestamps?output_format=mp3_44100_128`;
+          const retry = await elevenLabsFetchWithKey(record.apiKey, retryUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const retryData = (await retry.json()) as TtsWithTimestampsResponse;
+          if (retry.ok && retryData.audio_base64) {
+            ElevenLabsKeyManager.markSuccess(record.id);
+            const audioPath = path.join(options.outDir, options.fileName || 'narration.mp3');
+            fs.writeFileSync(audioPath, Buffer.from(retryData.audio_base64, 'base64'));
+            const words = alignmentToWords(
+              retryData.normalized_alignment || retryData.alignment
+            );
+            const srtPath = path.join(options.outDir, 'subs.srt');
+            fs.writeFileSync(srtPath, wordsToSrt(words), 'utf8');
+            return { audioPath, srtPath, words, modelId };
+          }
+          lastDetail =
+            typeof retryData.detail === 'string'
+              ? retryData.detail
+              : retryData.detail?.message || detail;
+        } catch (addErr) {
+          lastDetail = addErr instanceof Error ? addErr.message : String(addErr);
+        }
+      }
+
+      if (res.status === 402 && /library voices/i.test(detail)) {
+        // Gói Free không TTS Library — thử key khác (có thể paid), không đổi giọng.
+        ElevenLabsKeyManager.markReady(record.id);
+        tried.add(record.id);
+        continue;
+      }
+
+      const kind = ElevenLabsKeyManager.applyHttpFailure(record.id, res.status, detail);
+      if (kind === 'fatal') {
+        if (res.status === 401) {
+          throw new Error(
+            'ElevenLabs API key không hợp lệ (HTTP 401). Vào Settings → lưu lại API key mới.'
+          );
+        }
+        throw new Error(`ElevenLabs TTS failed: HTTP ${res.status} ${detail}`);
+      }
+      tried.add(record.id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      lastDetail = msg;
+      if (/HTTP 401|không hợp lệ|TTS failed: HTTP 4[0-2]/i.test(msg) && !/402|library/i.test(msg)) {
+        // fatal đã throw phía trên; các lỗi khác → thử key tiếp
+      }
+      if (/Thiếu|empty text|không hợp lệ \(HTTP 401\)|TTS failed: HTTP 422/i.test(msg)) {
+        throw err;
+      }
+      ElevenLabsKeyManager.markReady(record.id);
+      tried.add(record.id);
     }
-    if (res.status === 401) {
-      throw new Error(
-        'ElevenLabs API key không hợp lệ (HTTP 401). Vào Settings → lưu lại API key mới.'
-      );
-    }
-    throw new Error(`ElevenLabs TTS failed: HTTP ${res.status} ${detail}`);
   }
-
-  const audioPath = path.join(options.outDir, options.fileName || 'narration.mp3');
-  fs.writeFileSync(audioPath, Buffer.from(data.audio_base64, 'base64'));
-
-  const words = alignmentToWords(data.normalized_alignment || data.alignment);
-  const srtPath = path.join(options.outDir, 'subs.srt');
-  fs.writeFileSync(srtPath, wordsToSrt(words), 'utf8');
-
-  return { audioPath, srtPath, words, modelId };
 }
 
 /** Short TTS sample when voice has no preview_url (uses quota). */

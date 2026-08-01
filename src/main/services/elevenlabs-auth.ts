@@ -11,6 +11,11 @@ import {
   type ElevenLabsMeta,
 } from '../store';
 import type { ElevenLabsSessionStatus } from '../../shared/types';
+import {
+  ElevenLabsKeyManager,
+  formatElevenLabsKeysUnavailableError,
+} from './api-keys/elevenlabs-key-manager';
+import { hasAnyElevenLabsApiKey, pickNextAvailableRecord, upsertElevenLabsKey } from './api-keys/elevenlabs-keys-store';
 
 const PARTITION = 'persist:elevenlabs';
 const LOGIN_URL = 'https://elevenlabs.io/app/sign-in';
@@ -65,7 +70,7 @@ export function installElevenLabsApiKeyCapture(): void {
       const rawKey = headers['xi-api-key'] || headers['Xi-Api-Key'] || headers['XI-API-KEY'];
       const key = Array.isArray(rawKey) ? rawKey[0] : rawKey;
       if (typeof key === 'string' && isLikelyElevenLabsApiKey(key)) {
-        saveCapturedElevenLabsApiKey(key.trim());
+        rememberElevenLabsApiKey(key.trim());
       }
       const rawAuth = headers.Authorization || headers.authorization;
       const auth = Array.isArray(rawAuth) ? rawAuth[0] : rawAuth;
@@ -159,7 +164,7 @@ async function extractApiKeyFromPage(win: BrowserWindow): Promise<string | null>
       })()
     `)) as string | null;
     if (found) {
-      saveCapturedElevenLabsApiKey(found);
+      rememberElevenLabsApiKey(found);
       return found;
     }
   } catch {
@@ -168,11 +173,24 @@ async function extractApiKeyFromPage(win: BrowserWindow): Promise<string | null>
   return null;
 }
 
+function rememberElevenLabsApiKey(apiKey: string, name?: string): void {
+  const key = apiKey.trim();
+  if (!isLikelyElevenLabsApiKey(key)) return;
+  saveCapturedElevenLabsApiKey(key);
+  try {
+    upsertElevenLabsKey(key, name);
+  } catch {
+    /* ignore duplicate/validation */
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function getValidApiKey(): string {
+  const fromPool = pickNextAvailableRecord()?.apiKey?.trim() || '';
+  if (isLikelyElevenLabsApiKey(fromPool)) return fromPool;
   const key = getCapturedElevenLabsApiKey().trim();
   return isLikelyElevenLabsApiKey(key) ? key : '';
 }
@@ -203,7 +221,7 @@ async function readApiKeyFromDom(win: BrowserWindow): Promise<string | null> {
       })()
     `)) as string | null;
     if (found) {
-      saveCapturedElevenLabsApiKey(found);
+      rememberElevenLabsApiKey(found);
       return found;
     }
   } catch {
@@ -515,7 +533,7 @@ export async function saveElevenLabsApiKeyManually(apiKey: string): Promise<Elev
     const body = await res.text();
     throw new Error(`API key bị ElevenLabs từ chối (HTTP ${res.status}): ${body.slice(0, 160)}`);
   }
-  saveCapturedElevenLabsApiKey(key);
+  rememberElevenLabsApiKey(key, 'Primary');
   const data = (await res.json()) as { email?: string; first_name?: string };
   saveElevenLabsMeta({
     loggedIn: true,
@@ -725,42 +743,115 @@ function headersToRecord(headers: Headers): Record<string, string> {
 }
 
 /**
- * Authenticated fetch against ElevenLabs API using a real xi-api-key
- * auto-provisioned from the logged-in free account.
+ * Authenticated fetch với multi-key failover (quota / 401 / 429 / voice chưa có trên account…).
+ * Chỉ đổi xi-api-key — URL (gồm voiceId TTS) giữ nguyên đến khi một key thành công hoặc hết key.
  */
 export async function elevenLabsFetch(
   input: string,
   init: RequestInit = {}
 ): Promise<Response> {
   installElevenLabsApiKeyCapture();
-  const apiKey = await ensureElevenLabsApiCredential();
 
-  const headerRecord: Record<string, string> = {
-    Accept: 'application/json',
-    'User-Agent':
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'xi-api-key': apiKey,
-  };
-
-  if (init.headers) {
-    const extra =
-      init.headers instanceof Headers
-        ? headersToRecord(init.headers)
-        : Array.isArray(init.headers)
-          ? Object.fromEntries(init.headers)
-          : { ...(init.headers as Record<string, string>) };
-    Object.assign(headerRecord, extra);
-    // Never mix Authorization with xi-api-key.
-    delete headerRecord.Authorization;
-    delete headerRecord.authorization;
-    headerRecord['xi-api-key'] = apiKey;
+  // Đảm bảo có ít nhất 1 key (migrate legacy / prompt login nếu trống).
+  if (!hasAnyElevenLabsApiKey() && !hasCapturedElevenLabsCredential()) {
+    await ensureElevenLabsApiCredential();
+    const legacy = getValidApiKey();
+    if (legacy) upsertElevenLabsKey(legacy, 'Primary');
   }
 
-  return fetch(input, {
-    method: init.method,
-    body: init.body,
-    headers: headerRecord,
-  });
+  const tried = new Set<string>();
+  let lastFailureDetail = '';
+
+  for (;;) {
+    const record = await ElevenLabsKeyManager.getAvailableKey(tried);
+    if (!record) {
+      const voiceMatch = /\/text-to-speech\/([^/?]+)/i.exec(input);
+      const voiceHint = voiceMatch
+        ? `Giọng ${decodeURIComponent(voiceMatch[1])} vẫn được giữ trên mọi key.`
+        : undefined;
+      throw new Error(formatElevenLabsKeysUnavailableError(lastFailureDetail, voiceHint));
+    }
+
+    ElevenLabsKeyManager.markBusy(record.id);
+
+    const headerRecord: Record<string, string> = {
+      Accept: 'application/json',
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'xi-api-key': record.apiKey,
+    };
+
+    if (init.headers) {
+      const extra =
+        init.headers instanceof Headers
+          ? headersToRecord(init.headers)
+          : Array.isArray(init.headers)
+            ? Object.fromEntries(init.headers)
+            : { ...(init.headers as Record<string, string>) };
+      Object.assign(headerRecord, extra);
+      delete headerRecord.Authorization;
+      delete headerRecord.authorization;
+      headerRecord['xi-api-key'] = record.apiKey;
+    }
+
+    // Timeout: retry cùng key tối đa 2 lần.
+    let networkError: unknown = null;
+    let res: Response | null = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 60_000);
+        try {
+          res = await fetch(input, {
+            method: init.method,
+            body: init.body,
+            headers: headerRecord,
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
+        networkError = null;
+        break;
+      } catch (err) {
+        networkError = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        const isTimeout = /abort|timeout|etimedout/i.test(msg);
+        if (!isTimeout || attempt >= 3) break;
+        await sleep(1000 * attempt);
+      }
+    }
+
+    if (networkError || !res) {
+      ElevenLabsKeyManager.markRateLimited(record.id, 15_000);
+      tried.add(record.id);
+      lastFailureDetail = networkError instanceof Error ? networkError.message : 'network error';
+      continue;
+    }
+
+    const bodyText = await res.text();
+    if (res.ok) {
+      ElevenLabsKeyManager.markSuccess(record.id);
+      return new Response(bodyText, {
+        status: res.status,
+        statusText: res.statusText,
+        headers: res.headers,
+      });
+    }
+
+    lastFailureDetail = bodyText.slice(0, 240);
+    const kind = ElevenLabsKeyManager.applyHttpFailure(record.id, res.status, bodyText);
+    if (kind === 'fatal') {
+      return new Response(bodyText, {
+        status: res.status,
+        statusText: res.statusText,
+        headers: res.headers,
+      });
+    }
+
+    // Hết token / voice chưa có trên account → sang key khác, URL (voiceId) không đổi.
+    tried.add(record.id);
+  }
 }
 
 export async function testElevenLabsSession(): Promise<{ ok: boolean; message: string }> {

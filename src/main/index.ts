@@ -28,6 +28,8 @@ import {
   testElevenLabsSession,
 } from './services/elevenlabs-auth';
 import { listElevenLabsVoices, previewElevenLabsVoice } from './services/elevenlabs-tts';
+import { ElevenLabsKeyManager } from './services/api-keys/elevenlabs-key-manager';
+import { listElevenLabsKeysPublic } from './services/api-keys/elevenlabs-keys-store';
 import { getUsageSnapshot, getUsageHistory, loadMoreUsageHistory } from './services/usage';
 import {
   installLocalMediaProtocol,
@@ -114,6 +116,35 @@ function registerIpc(): void {
   ipcMain.handle(IPC.elevenLabsOpenApiKeys, async () => openElevenLabsApiKeysPage(mainWindow));
   ipcMain.handle(IPC.elevenLabsSaveApiKey, async (_e, apiKey: string) =>
     saveElevenLabsApiKeyManually(apiKey)
+  );
+  ipcMain.handle(IPC.elevenLabsListApiKeys, () => listElevenLabsKeysPublic());
+  ipcMain.handle(
+    IPC.elevenLabsAddApiKey,
+    (_e, input: { apiKey: string; name?: string }) => {
+      ElevenLabsKeyManager.addKey(input.apiKey, input.name);
+      return listElevenLabsKeysPublic();
+    }
+  );
+  ipcMain.handle(
+    IPC.elevenLabsUpdateApiKey,
+    (
+      _e,
+      input: { id: string; name?: string; apiKey?: string; enabled?: boolean }
+    ) => ElevenLabsKeyManager.update(input.id, input)
+  );
+  ipcMain.handle(IPC.elevenLabsDeleteApiKey, (_e, id: string) =>
+    ElevenLabsKeyManager.remove(id)
+  );
+  ipcMain.handle(
+    IPC.elevenLabsMoveApiKey,
+    (_e, input: { id: string; direction: 'up' | 'down' }) =>
+      ElevenLabsKeyManager.move(input.id, input.direction)
+  );
+  ipcMain.handle(IPC.elevenLabsResetApiKeyStatus, (_e, id: string) =>
+    ElevenLabsKeyManager.resetStatus(id)
+  );
+  ipcMain.handle(IPC.elevenLabsTestApiKey, async (_e, id: string) =>
+    ElevenLabsKeyManager.testKey(id)
   );
   ipcMain.handle(IPC.elevenLabsGetSession, async () => getElevenLabsSessionStatus());
   ipcMain.handle(IPC.elevenLabsClearSession, async () => clearElevenLabsSession());

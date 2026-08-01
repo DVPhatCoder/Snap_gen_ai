@@ -98,6 +98,7 @@ export default function ElevenLabsVoicePicker({
   const [query, setQuery] = useState('');
   const [langFilter, setLangFilter] = useState('all');
   const [accentFilter, setAccentFilter] = useState('all');
+  const [includeLibrary, setIncludeLibrary] = useState(true);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -134,17 +135,18 @@ export default function ElevenLabsVoicePicker({
     return [...map.values()].sort((a, b) => a.label.localeCompare(b.label, 'en'));
   }, [voices]);
 
-  // Luôn ẩn Voice Library — Free API không TTS được (402), checkbox trước đó dễ hiểu nhầm.
+  // Hiện cả Voice Library (đã Add). Free API có thể 402 — cảnh báo bên dưới, không ẩn.
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return voices.filter((v) => {
-      if ((v.category || '').toLowerCase() === 'library') return false;
+      const isLib = (v.category || '').toLowerCase() === 'library';
+      if (isLib && !includeLibrary) return false;
       if (!voiceMatchesLanguage(v, langFilter)) return false;
       if (!voiceMatchesAccent(v, accentFilter)) return false;
       if (!q) return true;
       return voiceBlob(v).includes(q);
     });
-  }, [voices, query, langFilter, accentFilter]);
+  }, [voices, query, langFilter, accentFilter, includeLibrary]);
 
   useEffect(() => {
     return () => {
@@ -241,6 +243,15 @@ export default function ElevenLabsVoicePicker({
             onChange={setAccentFilter}
           />
         </div>
+        <label className="el-voice-library-toggle">
+          <input
+            type="checkbox"
+            checked={includeLibrary}
+            disabled={disabled}
+            onChange={(e) => setIncludeLibrary(e.target.checked)}
+          />
+          <span>Hiện Voice Library đã Add ({libraryHidden})</span>
+        </label>
         <input
           type="search"
           value={query}
@@ -254,12 +265,13 @@ export default function ElevenLabsVoicePicker({
       <div className="el-voice-list" role="listbox" aria-label="Danh sách giọng">
         {filtered.length === 0 ? (
           <p className="muted pad">
-            Không có giọng premade khớp bộ lọc. Thử All languages / xóa ô tìm kiếm.
+            Không có giọng khớp bộ lọc. Bật «Hiện Voice Library» hoặc xóa ô tìm kiếm.
           </p>
         ) : (
           filtered.map((voice) => {
             const active = voice.voiceId === value;
             const playing = playingId === voice.voiceId;
+            const isLib = (voice.category || '').toLowerCase() === 'library';
             return (
               <div
                 key={voice.voiceId}
@@ -273,7 +285,10 @@ export default function ElevenLabsVoicePicker({
                   disabled={disabled}
                   onClick={() => onChange(voice.voiceId)}
                 >
-                  <strong>{voice.name}</strong>
+                  <strong>
+                    {voice.name}
+                    {isLib ? ' · Library' : ''}
+                  </strong>
                   <span>{voiceMeta(voice) || voice.voiceId}</span>
                 </button>
                 <button
@@ -292,15 +307,14 @@ export default function ElevenLabsVoicePicker({
       </div>
       {selectedIsLibrary ? (
         <p className="hint voice-library-warn">
-          Giọng đang lưu thuộc Voice Library — Free API bị 402. Hãy chọn một giọng trong danh sách
-          (premade) rồi Generate lại.
+          Giọng Library: khi hết token, app tự Add cùng giọng sang API key mới rồi TTS tiếp (có thể
+          khác voice_id trên account đó). Gói Free vẫn có thể bị ElevenLabs 402.
         </p>
       ) : null}
       <p className="hint">
-        {filtered.length} giọng dùng được qua API
-        {libraryHidden ? ` · đã ẩn ${libraryHidden} Voice Library` : ''}
+        {filtered.length} giọng
         {previewError ? ` · ${previewError}` : ''}
-        {!selected?.previewUrl && selected && !selectedIsLibrary
+        {!selected?.previewUrl && selected
           ? ' · Giọng này không có sample sẵn — nghe thử sẽ gọi TTS ngắn.'
           : ''}
       </p>

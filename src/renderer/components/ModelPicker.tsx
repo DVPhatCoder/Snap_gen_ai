@@ -1,4 +1,11 @@
 import type { ImageFamily, MediaKind, ModelOption, VideoFamily } from '../../shared/types';
+import {
+  OUTPUT_FORMAT_PRESETS,
+  getOutputFormatPreset,
+  inferOutputFormatId,
+  resolveAspectRatioForModel,
+  type OutputFormatId,
+} from '../../shared/output-format';
 
 interface Props {
   mediaKind: MediaKind;
@@ -7,11 +14,14 @@ interface Props {
   family: string;
   modelId: string;
   aspectRatio: string;
+  /** Optional: nhớ preset khi nhiều format cùng 9:16. */
+  outputFormat?: string;
   resolution: string;
   mode: string;
   onFamilyChange: (f: VideoFamily | ImageFamily) => void;
   onModelChange: (id: string) => void;
   onAspectRatioChange: (v: string) => void;
+  onOutputFormatChange?: (formatId: OutputFormatId) => void;
   onResolutionChange: (v: string) => void;
   onModeChange: (v: string) => void;
 }
@@ -20,6 +30,17 @@ export default function ModelPicker(props: Props) {
   const familyModels = props.models.filter((m) => m.family === props.family && m.kind === props.mediaKind);
   const selected = familyModels.find((m) => m.id === props.modelId) ?? familyModels[0];
   const modes = selected?.extraFields?.mode ?? [];
+  const modelAspectRatios = selected?.aspectRatios ?? [];
+
+  const selectedFormatId = inferOutputFormatId(props.aspectRatio, props.outputFormat);
+
+  const onFormatChange = (formatId: string) => {
+    const preset = getOutputFormatPreset(formatId);
+    if (!preset) return;
+    const resolved = resolveAspectRatioForModel(preset.aspectRatio, modelAspectRatios);
+    props.onOutputFormatChange?.(preset.id);
+    props.onAspectRatioChange(resolved);
+  };
 
   return (
     <div className="model-picker">
@@ -56,18 +77,24 @@ export default function ModelPicker(props: Props) {
 
       <div className="grid-2">
         <div className="field">
-          <label htmlFor="ar">Aspect ratio</label>
+          <label htmlFor="output-format">Output Format</label>
           <select
-            id="ar"
-            value={props.aspectRatio}
-            onChange={(e) => props.onAspectRatioChange(e.target.value)}
+            id="output-format"
+            value={selectedFormatId}
+            onChange={(e) => onFormatChange(e.target.value)}
           >
-            {(selected?.aspectRatios ?? []).map((a) => (
-              <option key={a} value={a}>
-                {a}
+            {OUTPUT_FORMAT_PRESETS.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.icon} {preset.label}
               </option>
             ))}
           </select>
+          <p className="hint muted-hint">
+            Pipeline dùng aspect ratio {resolveAspectRatioForModel(
+              getOutputFormatPreset(selectedFormatId)?.aspectRatio || '16:9',
+              modelAspectRatios
+            )}
+          </p>
         </div>
         <div className="field">
           <label htmlFor="res">Resolution</label>

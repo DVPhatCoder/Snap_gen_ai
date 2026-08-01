@@ -31,6 +31,18 @@ function storePath(): string {
   return path.join(app.getPath('userData'), 'studio-store.json');
 }
 
+export interface StoredElevenLabsKeyBlob {
+  id: string;
+  name?: string;
+  apiKeyEnc?: string;
+  apiKeyPlain?: string;
+  priority: number;
+  enabled: boolean;
+  status?: string;
+  lastUsed?: number;
+  cooldownUntil?: number;
+}
+
 interface StoreFile {
   keysEnc?: string;
   keysPlain?: ApiKeys & { elevenLabsApiKey?: string };
@@ -41,6 +53,8 @@ interface StoreFile {
   elevenLabsApiKeyPlain?: string;
   elevenLabsAuthEnc?: string;
   elevenLabsAuthPlain?: string;
+  /** Multi-key failover list (encrypted per key). */
+  elevenLabsKeys?: StoredElevenLabsKeyBlob[];
 }
 
 function readFile(): StoreFile {
@@ -58,6 +72,15 @@ function readFile(): StoreFile {
 function writeFile(data: StoreFile): void {
   fs.mkdirSync(path.dirname(storePath()), { recursive: true });
   fs.writeFileSync(storePath(), JSON.stringify(data, null, 2), 'utf8');
+}
+
+/** Internal store access for KeyManager (multi-key blob). */
+export function readStoreFile(): StoreFile {
+  return readFile();
+}
+
+export function writeStoreFile(data: StoreFile): void {
+  writeFile(data);
 }
 
 export function getKeys(): ApiKeys {
@@ -225,6 +248,10 @@ export function clearCapturedElevenLabsApiKey(): void {
 }
 
 export function hasCapturedElevenLabsCredential(): boolean {
+  const data = readFile();
+  if (data.elevenLabsKeys?.some((k) => Boolean(k.apiKeyEnc || k.apiKeyPlain))) {
+    return true;
+  }
   const key = getCapturedElevenLabsApiKey().trim();
   // Only a real API key unlocks api.elevenlabs.io. JWT/session alone is not enough.
   return /^(sk_|xi_)/i.test(key);

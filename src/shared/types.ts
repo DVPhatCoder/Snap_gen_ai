@@ -43,6 +43,10 @@ export interface ProjectVoiceSettings {
   openaiTtsVoice: string;
   elevenLabsVoiceId: string;
   elevenLabsModelId: string;
+  /** Meta để tự Add Voice Library sang API key / account mới khi failover. */
+  elevenLabsPublicOwnerId?: string;
+  elevenLabsOriginalVoiceId?: string;
+  elevenLabsVoiceName?: string;
 }
 
 export interface ElevenLabsVoice {
@@ -51,6 +55,10 @@ export interface ElevenLabsVoice {
   previewUrl?: string;
   category?: string;
   labels?: Record<string, string>;
+  /** Public owner ID (Voice Library) — dùng để Add sang account/API key khác. */
+  publicOwnerId?: string;
+  /** ID gốc trên Voice Library (khác voiceId sau khi Add vào account). */
+  originalVoiceId?: string;
 }
 
 export type ExportMode = 'final' | 'scenes';
@@ -162,12 +170,20 @@ export interface ProjectDraft {
   stylePrompt: string;
   /** Model ChatGPT viết kịch bản — theo từng dự án. */
   openaiChatModel: string;
+  /**
+   * Output Format UI (youtube, tiktok, …).
+   * API vẫn dùng `aspectRatio`; field này chỉ để nhớ preset khi nhiều format cùng ratio.
+   */
+  outputFormat?: string;
   /** Voiceover theo dự án. */
   ttsProvider: 'openai' | 'elevenlabs';
   openaiTtsModel: string;
   openaiTtsVoice: string;
   elevenLabsVoiceId: string;
   elevenLabsModelId: string;
+  elevenLabsPublicOwnerId?: string;
+  elevenLabsOriginalVoiceId?: string;
+  elevenLabsVoiceName?: string;
 }
 
 export interface SceneMediaAsset {
@@ -236,6 +252,9 @@ export interface GenerateJobInput {
   openaiTtsVoice?: string;
   elevenLabsVoiceId?: string;
   elevenLabsModelId?: string;
+  elevenLabsPublicOwnerId?: string;
+  elevenLabsOriginalVoiceId?: string;
+  elevenLabsVoiceName?: string;
 }
 
 export type JobPhase =

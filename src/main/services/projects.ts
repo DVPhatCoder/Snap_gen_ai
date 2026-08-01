@@ -112,6 +112,7 @@ function readDraft(id: string): ProjectDraft | null {
       mediaKind,
       stylePrompt: raw.stylePrompt ?? '',
       openaiChatModel: resolveProjectChatModel(raw.openaiChatModel, settings.openaiModel),
+      outputFormat: raw.outputFormat,
       ...voice,
     };
     // Dự án cũ chưa có voice / chat model → snapshot vào draft một lần.

@@ -43,16 +43,11 @@ export default function ProjectVoicePanel({
         const list = await window.studio.listElevenLabsVoices();
         if (cancelled) return;
         setVoices(list);
-        const current = list.find((v) => v.voiceId === value.elevenLabsVoiceId);
-        const isLibrary = (current?.category || '').toLowerCase() === 'library';
-        const premade =
-          list.find((v) => (v.category || '').toLowerCase() === 'premade') ||
-          list.find((v) => (v.category || '').toLowerCase() !== 'library');
-        // Chưa có id, hoặc đang lưu giọng Library (Free API bị 402) → chuyển premade.
-        if (list.length && (!value.elevenLabsVoiceId?.trim() || isLibrary) && premade) {
-          if (premade.voiceId !== value.elevenLabsVoiceId) {
-            onChange({ ...value, elevenLabsVoiceId: premade.voiceId });
-          }
+        // Chỉ gán mặc định khi chưa có voiceId — không ghi đè giọng Library user đã chọn.
+        if (list.length && !value.elevenLabsVoiceId?.trim()) {
+          const premade =
+            list.find((v) => (v.category || '').toLowerCase() === 'premade') || list[0];
+          if (premade) onChange({ ...value, elevenLabsVoiceId: premade.voiceId });
         }
       } catch {
         if (!cancelled) setVoices([]);
@@ -117,7 +112,15 @@ export default function ProjectVoicePanel({
               value={value.elevenLabsVoiceId}
               modelId={value.elevenLabsModelId}
               disabled={disabled || !elevenLabsReady || voices.length === 0}
-              onChange={(voiceId) => patch({ elevenLabsVoiceId: voiceId })}
+              onChange={(voiceId) => {
+                const v = voices.find((item) => item.voiceId === voiceId);
+                patch({
+                  elevenLabsVoiceId: voiceId,
+                  elevenLabsPublicOwnerId: v?.publicOwnerId,
+                  elevenLabsOriginalVoiceId: v?.originalVoiceId || voiceId,
+                  elevenLabsVoiceName: v?.name,
+                });
+              }}
             />
           </div>
           <div className="field">
