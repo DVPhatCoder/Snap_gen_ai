@@ -32,6 +32,8 @@ export interface AppSettings {
   elevenLabsModelId: string;
   burnSubtitles: boolean;
   lastExportDir?: string;
+  /** Số scene Snapgen generate song song (worker pool). Mặc định 5. */
+  maxConcurrentScenes?: number;
 }
 
 /** Voiceover gắn theo từng dự án (lưu trong draft.json). */
@@ -226,6 +228,8 @@ export interface GenerateJobInput {
   regenerateSceneIds?: string[];
   /** When false and narration already exists, skip TTS + Whisper. Default true. */
   refreshNarration?: boolean;
+  /** Override số worker song song (mặc định lấy từ Settings). */
+  maxConcurrentScenes?: number;
   /** Voiceover theo dự án (ưu tiên hơn AppSettings). */
   ttsProvider?: 'openai' | 'elevenlabs';
   openaiTtsModel?: string;
@@ -244,6 +248,28 @@ export type JobPhase =
   | 'done'
   | 'error';
 
+/** Trạng thái từng scene trong worker pool. */
+export type SceneJobState =
+  | 'queued'
+  | 'generating'
+  | 'polling'
+  | 'retrying'
+  | 'completed'
+  | 'cached'
+  | 'failed'
+  | 'skipped';
+
+export interface SceneJobProgress {
+  sceneIndex: number;
+  sceneId: string;
+  state: SceneJobState;
+  detailPercent?: number;
+  chunkIndex?: number;
+  chunkTotal?: number;
+  attempt?: number;
+  error?: string;
+}
+
 export interface JobProgress {
   phase: JobPhase;
   message: string;
@@ -256,6 +282,12 @@ export interface JobProgress {
   chunkIndex?: number;
   chunkTotal?: number;
   error?: string;
+  /** Số scene đã xong (completed + cached). */
+  scenesCompleted?: number;
+  scenesFailed?: number;
+  maxConcurrent?: number;
+  /** Snapshot trạng thái từng scene (worker pool). */
+  sceneStatuses?: SceneJobProgress[];
 }
 
 export type ActiveJobKind = 'generate' | 'remux';

@@ -399,6 +399,8 @@ export const TYPICAL_NARRATIVE_BEAT_SEC = IDEAL_SCENE_BEAT_SEC;
 /** Absolute ceiling for one scene (extend/multi-cut covers model shot limits). */
 export const MAX_SCENE_DURATION_SEC = 180;
 export const WORDS_PER_SECOND = 2.5;
+/** Nhịp đọc tiếng Nhật/Trung/Hàn ≈ ký tự/giây (không dựa vào khoảng trắng). */
+export const CJK_CHARS_PER_SECOND = 5;
 /** Narration phải đạt tối thiểu tỉ lệ này so với target trước TTS. */
 export const MIN_NARRATION_COVERAGE = 0.85;
 /** Sau TTS: nếu |audio − target| / target > ngưỡng này → AI rewrite + TTS lại. */
@@ -446,22 +448,87 @@ export function planScenesFromDuration(
   };
 }
 
+const CJK_CHAR_RE =
+  /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/g;
+
+export function isCjkLanguage(language?: string | null): boolean {
+  const value = String(language || '').toLowerCase();
+  if (!value) return false;
+  return /japan|日本語|nihongo|chinese|中文|mandarin|cantonese|korean|한국어|hangul|tiếng nhật|tiếng trung|tiếng hàn|nhật bản|trung quốc|hàn quốc|\bja\b|\bzh\b|\bko\b/.test(
+    value
+  );
+}
+
+export function countCjkChars(text: string): number {
+  return (text.match(CJK_CHAR_RE) || []).length;
+}
+
 export function countSpokenWords(text: string): number {
-  return text
+  const trimmed = text.trim();
+  if (!trimmed) return 0;
+  // Tiếng Nhật/Trung/Hàn thường không cách từ — đếm ký tự CJK.
+  const cjk = countCjkChars(trimmed);
+  const latin = trimmed
+    .replace(CJK_CHAR_RE, ' ')
     .trim()
     .split(/\s+/)
     .filter(Boolean).length;
+  if (cjk >= 8 && cjk >= latin * 2) return cjk;
+  if (cjk > 0 && latin === 0) return cjk;
+  // Hỗn hợp: quy đổi CJK → “từ tương đương” để so sánh ngân sách từ Latin.
+  if (cjk > 0) {
+    return latin + Math.round(cjk * (WORDS_PER_SECOND / CJK_CHARS_PER_SECOND));
+  }
+  return latin;
 }
 
-/** Natural speech pacing ≈ 2.5 words/sec. */
+/** Natural speech pacing — Latin ≈ 2.5 từ/s, CJK ≈ 5 ký tự/s. */
 export function estimateSpokenSeconds(text: string, fallback = 6): number {
-  const words = countSpokenWords(text);
-  if (!words) return fallback;
-  return Math.max(2, words / WORDS_PER_SECOND);
+  const trimmed = text.trim();
+  if (!trimmed) return fallback;
+
+  const cjk = countCjkChars(trimmed);
+  const latin = trimmed
+    .replace(CJK_CHAR_RE, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+
+  let seconds = 0;
+  if (cjk) seconds += cjk / CJK_CHARS_PER_SECOND;
+  if (latin) seconds += latin / WORDS_PER_SECOND;
+  if (!seconds) return fallback;
+  return Math.max(2, seconds);
 }
 
 export function wordsForDurationSec(seconds: number): number {
   return Math.max(4, Math.round(Math.max(0, seconds) * WORDS_PER_SECOND));
+}
+
+/** Ngân sách lời thoại theo ngôn ngữ (từ hoặc ký tự CJK). */
+export function spokenBudgetForDurationSec(
+  seconds: number,
+  language?: string | null
+): { amount: number; unitLabel: string; perSec: number } {
+  if (isCjkLanguage(language)) {
+    const amount = Math.max(8, Math.round(Math.max(0, seconds) * CJK_CHARS_PER_SECOND));
+    return { amount, unitLabel: 'ký tự', perSec: CJK_CHARS_PER_SECOND };
+  }
+  return {
+    amount: wordsForDurationSec(seconds),
+    unitLabel: 'từ',
+    perSec: WORDS_PER_SECOND,
+  };
+}
+
+export function countSpokenBudgetUnits(text: string, language?: string | null): number {
+  const trimmed = text.trim();
+  if (!trimmed) return 0;
+  if (isCjkLanguage(language) || countCjkChars(trimmed) >= 8) {
+    const cjk = countCjkChars(trimmed);
+    if (cjk > 0) return cjk;
+  }
+  return countSpokenWords(trimmed);
 }
 
 export function estimateScriptSpokenSeconds(
@@ -490,10 +557,8 @@ export function assertNarrationCoversTarget(
   const spoken = estimateScriptSpokenSeconds(scenes);
   const target = Math.max(1, Math.round(targetDurationSec));
   if (spoken < target * minRatio) {
-    const needWords = Math.round(target * WORDS_PER_SECOND);
-    const haveWords = Math.round(spoken * WORDS_PER_SECOND);
     throw new Error(
-      `Narration quá ngắn: ~${formatDurationLabel(spoken)} (~${haveWords} từ) so với mục tiêu ${formatDurationLabel(target)} (~${needWords} từ). ` +
+      `Narration quá ngắn: ~${formatDurationLabel(spoken)} so với mục tiêu ${formatDurationLabel(target)}. ` +
         `AI chưa viết đủ lời thoại — hãy Generate script lại (hoặc rút ngắn thời lượng video).`
     );
   }

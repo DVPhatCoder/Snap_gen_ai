@@ -23,6 +23,7 @@ export default function Settings() {
     elevenLabsVoiceId: '21m00Tcm4TlvDq8ikWAM',
     elevenLabsModelId: 'eleven_flash_v2_5',
     burnSubtitles: false,
+    maxConcurrentScenes: 5,
   });
   const [elevenLabs, setElevenLabs] = useState<ElevenLabsSessionStatus>({
     loggedIn: false,
@@ -511,6 +512,29 @@ export default function Settings() {
         />
         <span>Burn-in subtitle vào video cuối</span>
       </label>
+
+      <div className="field">
+        <label htmlFor="max-concurrent-scenes">Số scene generate song song</label>
+        <input
+          id="max-concurrent-scenes"
+          type="number"
+          min={1}
+          max={12}
+          value={settings.maxConcurrentScenes ?? 5}
+          onChange={(e) =>
+            setSettings({
+              ...settings,
+              maxConcurrentScenes: Math.max(
+                1,
+                Math.min(12, Number(e.target.value) || 5)
+              ),
+            })
+          }
+        />
+        <p className="hint">
+          Worker pool Snapgen (mặc định 5). Tăng để nhanh hơn; quá cao có thể bị rate-limit.
+        </p>
+      </div>
 
       <div className="row-actions">
         <button type="button" className="btn primary" disabled={busy} onClick={() => void saveAll()}>

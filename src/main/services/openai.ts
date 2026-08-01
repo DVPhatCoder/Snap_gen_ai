@@ -2,12 +2,13 @@ import type { GenerateIdeaInput, SceneDraft, SceneSection, ScriptDraft } from '.
 import {
   assertNarrationCoversTarget,
   assertScenesNarrationFillDuration,
-  countSpokenWords,
+  countSpokenBudgetUnits,
   estimateScriptSpokenSeconds,
   estimateSpokenSeconds,
   familySupportsExtend,
   findScenesWithShortNarration,
   formatDurationLabel,
+  isCjkLanguage,
   maxSingleShotDuration,
   MAX_SCENE_BEAT_SEC,
   mergeUndersizedScenes,
@@ -15,13 +16,15 @@ import {
   MIN_SCENE_BEAT_SEC,
   normalizeSceneDurations,
   planScenesFromDuration,
+  spokenBudgetForDurationSec,
   WORDS_PER_SECOND,
-  wordsForDurationSec,
 } from '../../shared/models';
 
-/** Chunk ~75s — đủ dài cho nội dung, đủ ngắn để model viết đủ lời trong 1 response. */
-const CHAPTER_CHUNK_SEC = 75;
+/** Chunk ~50s (~125 từ) — dễ viết đủ lời hơn chunk dài. */
+const CHAPTER_CHUNK_SEC = 50;
 const MAX_COMPLETION_TOKENS = 16384;
+/** Số lần nối tiếp lời thoại khi chapter còn thiếu từ. */
+const MAX_NARRATION_CONTINUATIONS = 6;
 
 interface ChapterOutline {
   name: string;
@@ -132,27 +135,6 @@ function finalizeDraft(
   parsed.narration = parsed.scenes.map((s) => s.narration_segment).join(' ');
   if (!parsed.title) parsed.title = 'Untitled Video';
   return parsed;
-}
-
-function shortSceneReport(scenes: SceneDraft[]): string {
-  return findScenesWithShortNarration(scenes)
-    .map(({ index, scene, spoken, planned }) => {
-      const needWords = wordsForDurationSec(planned);
-      const haveWords = countSpokenWords(scene.narration_segment || '');
-      return `- Scene ${index + 1} [${scene.chapter || scene.section || 'body'}]: ~${haveWords} words (~${Math.round(spoken)}s) but needs ~${needWords} words for ${planned}s.`;
-    })
-    .join('\n');
-}
-
-function longSceneReport(scenes: SceneDraft[]): string {
-  return scenes
-    .map((scene, index) => {
-      const spoken = estimateSpokenSeconds(scene.narration_segment || '', 0);
-      if (spoken <= MAX_SCENE_BEAT_SEC) return null;
-      return `- Scene ${index + 1} [${scene.chapter || ''}]: ~${Math.round(spoken)}s — SPLIT into multiple scenes.`;
-    })
-    .filter(Boolean)
-    .join('\n');
 }
 
 function needsNarrationExpansion(scenes: SceneDraft[], targetDurationSec: number): boolean {
@@ -318,9 +300,66 @@ export async function testOpenAI(apiKey: string): Promise<{ ok: boolean; message
   }
 }
 
+
+/** Chia narration thành scene theo câu khi AI cắt mất lời. */
+function splitNarrationFallback(
+  narration: string,
+  chapter: ChapterOutline,
+  typicalBeatSec: number
+): SceneDraft[] {
+  const text = narration.trim();
+  if (!text) return [];
+
+  const sentences = text
+    .split(/(?<=[.!?…。！？])\s+|(?<=[.!?…。！？])(?=[^\s])/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const chunks: string[] = [];
+  if (!sentences.length) {
+    chunks.push(text);
+  } else {
+    let buf = '';
+    for (const sentence of sentences) {
+      const next = buf ? `${buf} ${sentence}` : sentence;
+      const nextSec = estimateSpokenSeconds(next, 0);
+      if (buf && nextSec > MAX_SCENE_BEAT_SEC) {
+        chunks.push(buf);
+        buf = sentence;
+      } else {
+        buf = next;
+      }
+    }
+    if (buf) chunks.push(buf);
+  }
+
+  // Gộp quá ngắn
+  const merged: string[] = [];
+  for (const chunk of chunks) {
+    const spoken = estimateSpokenSeconds(chunk, 0);
+    if (merged.length && spoken < MIN_SCENE_BEAT_SEC) {
+      merged[merged.length - 1] = `${merged[merged.length - 1]} ${chunk}`.trim();
+    } else {
+      merged.push(chunk);
+    }
+  }
+
+  return merged.map((segment, index) => ({
+    id: `scene-tmp-${index + 1}`,
+    visual_prompt: `Cinematic shot for ${chapter.name}, beat ${index + 1}: illustrate the spoken idea clearly.`,
+    narration_segment: segment,
+    duration_hint: Math.max(
+      MIN_SCENE_BEAT_SEC,
+      Math.round(estimateSpokenSeconds(segment, typicalBeatSec) * 10) / 10
+    ),
+    section: chapter.section,
+    chapter: chapter.name,
+  }));
+}
+
 /**
  * Tạo script theo Chapter → Scene.
- * Video dài: outline trước, rồi gen từng chapter (tránh 1 response quá ngắn / bị cắt).
+ * Mỗi chapter: viết narration văn xuôi đủ từ trước → mới tách scene (tránh caption ngắn trong JSON).
  */
 export async function generateScript(
   apiKey: string,
@@ -333,7 +372,7 @@ export async function generateScript(
   const maxShot =
     input.maxShotSec ?? maxSingleShotDuration(input.model) ?? plan.typicalBeatSec;
   const canExtend = !isImage && familySupportsExtend(String(input.family));
-  const targetWords = plan.targetWordCount;
+  const totalBudget = spokenBudgetForDurationSec(targetDurationSec, input.language);
 
   const styleLine = input.stylePrompt?.trim()
     ? `- Global visual style (MUST apply to every visual_prompt): ${input.stylePrompt.trim()}`
@@ -363,14 +402,9 @@ Return ONLY JSON:
 }
 Rules:
 - Sum of targetSec MUST equal ${targetDurationSec}.
-- Prefer chapters of ~${CHAPTER_CHUNK_SEC}s (range 45–90s). For listicles, each list item can be its own chapter.
+- Prefer chapters of ~${CHAPTER_CHUNK_SEC}s (range 40–60s). For listicles, each list item can be its own chapter.
 - Must include introduction, body (one or more), conclusion.
 - Do NOT write full narration yet — only chapter plan.`;
-
-  const outlineUser = `Brief / topic: ${input.brief}
-
-Plan chapters for a ${targetDurationSec}s (${formatDurationLabel(targetDurationSec)}) video (~${targetWords} spoken words total).
-${input.stylePrompt?.trim() ? `Style: ${input.stylePrompt.trim()}` : ''}`;
 
   let title = 'Untitled Video';
   let chapters: ChapterOutline[];
@@ -379,7 +413,10 @@ ${input.stylePrompt?.trim() ? `Style: ${input.stylePrompt.trim()}` : ''}`;
       apiKey,
       model: openaiModel,
       system: outlineSystem,
-      user: outlineUser,
+      user: `Brief / topic: ${input.brief}
+
+Plan chapters for a ${targetDurationSec}s (${formatDurationLabel(targetDurationSec)}) video (~${totalBudget.amount} ${totalBudget.unitLabel} of speech).
+${input.stylePrompt?.trim() ? `Style: ${input.stylePrompt.trim()}` : ''}`,
       temperature: 0.6,
     });
     title = String(outline.title || '').trim() || title;
@@ -388,8 +425,96 @@ ${input.stylePrompt?.trim() ? `Style: ${input.stylePrompt.trim()}` : ''}`;
     chapters = defaultChapterPlan(targetDurationSec);
   }
 
-  // —— Phase 2: generate each chapter with full narration ——
-  const chapterSystem = `You write ONE chapter of a video script as JSON scenes only.
+  // —— Phase 2a: narration văn xuôi đủ từ ——
+  const writeNarrationSystem = `You write spoken voiceover for ONE video chapter.
+Return ONLY JSON: { "narration": string } OR { "continuation": string }
+Language: ${input.language}
+Write natural host speech. No stage directions, no bullet points, no markdown.
+Do NOT summarize. Aim for the exact word budget.`;
+
+  const previousNarrationTail: string[] = [];
+  const chapterNarrations: Array<{ chapter: ChapterOutline; narration: string }> = [];
+
+  for (let i = 0; i < chapters.length; i++) {
+    const chapter = chapters[i];
+    const budget = spokenBudgetForDurationSec(chapter.targetSec, input.language);
+    const minUnits = Math.round(budget.amount * MIN_NARRATION_COVERAGE);
+    const minSec = chapter.targetSec * MIN_NARRATION_COVERAGE;
+    const prevContext =
+      previousNarrationTail.length > 0
+        ? `Continue smoothly after this ending (do not repeat):\n"""${previousNarrationTail[previousNarrationTail.length - 1].slice(-400)}"""`
+        : 'This is the opening of the video.';
+
+    let narration = '';
+    for (let attempt = 1; attempt <= MAX_NARRATION_CONTINUATIONS; attempt++) {
+      const spokenSec = estimateSpokenSeconds(narration, 0);
+      const haveUnits = countSpokenBudgetUnits(narration, input.language);
+      if (spokenSec >= minSec && haveUnits >= minUnits * 0.7) break;
+      const needMore = Math.max(0, minUnits - haveUnits);
+
+      if (!narration) {
+        const parsed = await chatJson<{ narration?: string }>({
+          apiKey,
+          model: openaiModel,
+          system: writeNarrationSystem,
+          user: `Video title: ${title}
+Brief: ${input.brief}
+
+Chapter ${i + 1}/${chapters.length}: "${chapter.name}" (${chapter.section})
+Summary: ${chapter.summary}
+TIME: ${chapter.targetSec}s → write enough spoken content for ~${chapter.targetSec}s
+Budget: ~${budget.amount} ${budget.unitLabel} (≥ ${minUnits} ${budget.unitLabel}).
+${isCjkLanguage(input.language) ? 'This is a CJK language: count characters (not English-style space-separated words).' : ''}
+
+${prevContext}
+
+Return JSON: { "narration": "<full spoken script for this chapter only>" }`,
+          temperature: 0.75,
+        });
+        narration = String(parsed.narration || '').trim();
+      } else {
+        const parsed = await chatJson<{ continuation?: string; narration?: string }>({
+          apiKey,
+          model: openaiModel,
+          system: writeNarrationSystem,
+          user: `Chapter "${chapter.name}" is TOO SHORT: ~${formatDurationLabel(spokenSec)} / ${chapter.targetSec}s (${haveUnits}/${minUnits} ${budget.unitLabel}).
+
+Already written (keep all of it, then CONTINUE):
+"""${narration}"""
+
+Return JSON: { "continuation": "<only the NEW sentences to append, add ~${needMore} ${budget.unitLabel}>" }
+Do not restart. Do not summarize the previous text.`,
+          temperature: 0.8,
+        });
+        const extra = String(parsed.continuation || parsed.narration || '').trim();
+        if (extra) {
+          if (
+            extra.length > narration.length * 0.8 &&
+            narration.length > 20 &&
+            extra.includes(narration.slice(0, Math.min(40, narration.length)))
+          ) {
+            narration = extra;
+          } else {
+            narration = `${narration} ${extra}`.trim();
+          }
+        }
+      }
+    }
+
+    const spokenSec = estimateSpokenSeconds(narration, 0);
+    if (spokenSec < chapter.targetSec * 0.45) {
+      throw new Error(
+        `Chapter "${chapter.name}" chỉ ~${formatDurationLabel(spokenSec)} (cần ~${formatDurationLabel(chapter.targetSec)}). ` +
+          `Thử Generate lại hoặc đổi model.`
+      );
+    }
+
+    chapterNarrations.push({ chapter, narration });
+    previousNarrationTail.push(narration);
+  }
+
+  // —— Phase 2b: tách narration → scenes ——
+  const splitSystem = `You split ONE chapter's voiceover into visual scenes.
 Return ONLY JSON:
 {
   "scenes": [
@@ -403,173 +528,103 @@ Return ONLY JSON:
     }
   ]
 }
-
 ${sharedRules}
-CRITICAL: This chapter alone must contain enough spoken words for its time budget.
-Short captions are a FAILURE. Write complete spoken sentences.`;
+CRITICAL: Concatenating all narration_segment MUST preserve the given narration (same words, same order). Do NOT shorten. Slice at natural beats (~${MIN_SCENE_BEAT_SEC}–${MAX_SCENE_BEAT_SEC}s each).`;
 
   const allScenes: SceneDraft[] = [];
-  const previousTail: string[] = [];
 
-  for (let i = 0; i < chapters.length; i++) {
-    const chapter = chapters[i];
-    const chapterWords = wordsForDurationSec(chapter.targetSec);
-    const minWords = Math.round(chapterWords * MIN_NARRATION_COVERAGE);
-    const sceneHint = Math.max(
-      3,
-      Math.round(chapter.targetSec / plan.typicalBeatSec)
-    );
-
+  for (const { chapter, narration } of chapterNarrations) {
+    const sceneHint = Math.max(3, Math.round(chapter.targetSec / plan.typicalBeatSec));
     let chapterScenes: SceneDraft[] = [];
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      const prevContext =
-        previousTail.length > 0
-          ? `Previous narration tail (continue smoothly, do not repeat):\n${previousTail.slice(-2).join('\n')}`
-          : 'This is the start of the video.';
-
-      const user = `Video title: ${title}
-Brief: ${input.brief}
-
-Chapter ${i + 1}/${chapters.length}: "${chapter.name}"
-section: ${chapter.section}
-summary: ${chapter.summary}
-TIME BUDGET for THIS chapter only: ${chapter.targetSec}s → write ~${chapterWords} spoken words (≥ ${minWords}).
-Soft scene count hint: ~${sceneHint} scenes (one idea each). All scenes.chapter = "${chapter.name}". All scenes.section = "${chapter.section}".
-
-${prevContext}
-
-${attempt > 1 ? `RETRY #${attempt}: previous draft was too short. Expand narration and/or add more one-idea scenes until ≥ ${minWords} words.` : ''}
-
-Return JSON with scenes for THIS chapter only.`;
-
+    try {
       const parsed = await chatJson<{ scenes?: SceneDraft[] }>({
         apiKey,
         model: openaiModel,
-        system: chapterSystem,
-        user,
-        temperature: 0.7,
-      });
+        system: splitSystem,
+        user: `Chapter "${chapter.name}" · section=${chapter.section} · ~${sceneHint} scenes
+Full narration to split (preserve EVERY word across segments):
+"""${narration}"""
 
+Return scenes. All scenes.chapter="${chapter.name}", scenes.section="${chapter.section}".`,
+        temperature: 0.4,
+      });
       chapterScenes = mapRawScenes(parsed.scenes || []).map((s) => ({
         ...s,
         chapter: chapter.name,
         section: chapter.section,
       }));
-
-      if (!chapterScenes.length) continue;
-
-      const spoken = estimateScriptSpokenSeconds(chapterScenes);
-      if (spoken >= chapter.targetSec * MIN_NARRATION_COVERAGE || attempt === 3) {
-        // If still short on last attempt, keep best effort — global assert later may still fail with clear message
-        break;
-      }
+    } catch {
+      chapterScenes = [];
     }
 
-    if (!chapterScenes.length) {
-      throw new Error(`AI không tạo được scene cho chapter "${chapter.name}". Thử Generate lại.`);
+    const joined = chapterScenes.map((s) => s.narration_segment || '').join(' ').trim();
+    const srcSec = estimateSpokenSeconds(narration, 0);
+    const outSec = estimateSpokenSeconds(joined, 0);
+    if (!chapterScenes.length || outSec < srcSec * 0.85) {
+      chapterScenes = splitNarrationFallback(narration, chapter, plan.typicalBeatSec);
     }
 
-    // Local beat fix: split overlong within chapter via one rewrite if needed
     if (needsBeatSplit(chapterScenes)) {
-      const longs = longSceneReport(chapterScenes);
-      const splitParsed = await chatJson<{ scenes?: SceneDraft[] }>({
-        apiKey,
-        model: openaiModel,
-        system: chapterSystem,
-        user: `Chapter "${chapter.name}" (${chapter.section}), budget ${chapter.targetSec}s (~${chapterWords} words).
-SPLIT these overlong beats into more one-idea scenes. Keep total speech length.
-${longs}
-
-Current scenes:
-${chapterScenes.map((s, idx) => `${idx + 1}. ${s.narration_segment}`).join('\n')}
-
-Return FULL chapter JSON scenes.`,
-        temperature: 0.55,
-      });
-      const splitScenes = mapRawScenes(splitParsed.scenes || []);
-      if (splitScenes.length) {
-        chapterScenes = splitScenes.map((s) => ({
-          ...s,
-          chapter: chapter.name,
-          section: chapter.section,
-        }));
-      }
+      const full = chapterScenes.map((s) => s.narration_segment).join(' ') || narration;
+      chapterScenes = splitNarrationFallback(full, chapter, plan.typicalBeatSec);
     }
 
     allScenes.push(...chapterScenes);
-    previousTail.push(
-      ...chapterScenes.slice(-2).map((s) => s.narration_segment || '')
-    );
   }
 
-  let draft = finalizeDraft(
-    { title, narration: '', scenes: allScenes },
-    targetDurationSec
-  );
+  let draft = finalizeDraft({ title, narration: '', scenes: allScenes }, targetDurationSec);
 
-  // —— Phase 3: nếu tổng vẫn thiếu → gen thêm scene cho các chapter yếu ——
-  for (let attempt = 1; attempt <= 2 && needsNarrationExpansion(draft.scenes, targetDurationSec); attempt++) {
-    const byChapter = new Map<string, SceneDraft[]>();
-    for (const scene of draft.scenes) {
-      const key = scene.chapter || scene.section || 'body';
-      const list = byChapter.get(key) || [];
-      list.push(scene);
-      byChapter.set(key, list);
-    }
+  // —— Phase 3: nếu tổng vẫn thiếu → nối lời vào body chapters đến khi đủ ——
+  for (let fill = 1; fill <= 4 && needsNarrationExpansion(draft.scenes, targetDurationSec); fill++) {
+    const spoken = estimateScriptSpokenSeconds(draft.scenes);
+    const deficitSec = Math.max(15, targetDurationSec - spoken);
+    const deficitBudget = spokenBudgetForDurationSec(deficitSec, input.language);
+    const bodyChapters = chapterNarrations.filter((c) => c.chapter.section === 'body');
+    const targetChapter =
+      bodyChapters[(fill - 1) % Math.max(1, bodyChapters.length)] ||
+      chapterNarrations[1] ||
+      chapterNarrations[0];
+    if (!targetChapter) break;
 
-    const weak = [...byChapter.entries()]
-      .map(([name, scenes]) => {
-        const spoken = estimateScriptSpokenSeconds(scenes);
-        const planned = scenes.reduce((s, x) => s + (x.duration_hint || 0), 0);
-        return { name, scenes, spoken, planned, deficit: planned - spoken };
-      })
-      .filter((c) => c.deficit > 8 || c.spoken < c.planned * MIN_NARRATION_COVERAGE)
-      .sort((a, b) => b.deficit - a.deficit);
-
-    if (!weak.length) break;
-
-    const target = weak[0];
-    const needWords = wordsForDurationSec(Math.max(target.planned, target.spoken + target.deficit));
-    const fill = await chatJson<{ scenes?: SceneDraft[] }>({
+    const parsed = await chatJson<{ continuation?: string }>({
       apiKey,
       model: openaiModel,
-      system: chapterSystem,
-      user: `Video title: ${title}
-Brief: ${input.brief}
+      system: writeNarrationSystem,
+        user: `The full video is still short (~${formatDurationLabel(spoken)} / ${formatDurationLabel(targetDurationSec)}). Add ≥ ${deficitBudget.amount} ${deficitBudget.unitLabel} of spoken content (~${Math.round(deficitSec)}s).
 
-EXPAND chapter "${target.name}" — currently ~${Math.round(target.spoken)}s speech but needs ~${Math.round(target.planned)}s.
-Write a FULL replacement scene list for this chapter with ≥ ${needWords} spoken words.
-Keep section="${target.scenes[0]?.section || 'body'}", chapter="${target.name}".
-Add more one-idea scenes as needed. Do not summarize.
+Chapter: ${targetChapter.chapter.name}
+Existing:
+"""${targetChapter.narration}"""
 
-Existing narration to improve upon:
-${target.scenes.map((s, idx) => `${idx + 1}. ${s.narration_segment}`).join('\n')}`,
-      temperature: 0.7,
+Return { "continuation": "<new sentences only, ≥ ${deficitBudget.amount} ${deficitBudget.unitLabel}>" }`,
+      temperature: 0.85,
     });
+    const extra = String(parsed.continuation || '').trim();
+    if (!extra) continue;
 
-    const filled = mapRawScenes(fill.scenes || []).map((s) => ({
-      ...s,
-      chapter: target.name,
-      section: target.scenes[0]?.section || normalizeSection(s.section) || 'body',
-    }));
-    if (!filled.length) continue;
-
+    targetChapter.narration = `${targetChapter.narration} ${extra}`.trim();
+    const rebuilt = splitNarrationFallback(
+      targetChapter.narration,
+      targetChapter.chapter,
+      plan.typicalBeatSec
+    );
     const nextScenes: SceneDraft[] = [];
     let replaced = false;
     for (const scene of draft.scenes) {
-      const key = scene.chapter || scene.section || 'body';
-      if (key === target.name) {
+      if ((scene.chapter || '') === targetChapter.chapter.name) {
         if (!replaced) {
-          nextScenes.push(...filled);
+          nextScenes.push(...rebuilt);
           replaced = true;
         }
         continue;
       }
       nextScenes.push(scene);
     }
-    if (!replaced) nextScenes.push(...filled);
-
-    draft = finalizeDraft({ title: draft.title, narration: '', scenes: nextScenes }, targetDurationSec);
+    if (!replaced) nextScenes.push(...rebuilt);
+    draft = finalizeDraft(
+      { title: draft.title, narration: '', scenes: nextScenes },
+      targetDurationSec
+    );
   }
 
   assertNarrationCoversTarget(draft.scenes, targetDurationSec, MIN_NARRATION_COVERAGE);

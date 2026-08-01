@@ -16,6 +16,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   elevenLabsVoiceId: '21m00Tcm4TlvDq8ikWAM',
   elevenLabsModelId: 'eleven_flash_v2_5',
   burnSubtitles: false,
+  maxConcurrentScenes: 5,
 };
 
 export interface ElevenLabsMeta {
@@ -113,6 +114,13 @@ export function getSettings(): AppSettings {
     elevenLabsModelId: merged.elevenLabsModelId || DEFAULT_SETTINGS.elevenLabsModelId,
     burnSubtitles: Boolean(merged.burnSubtitles),
     lastExportDir: merged.lastExportDir || '',
+    maxConcurrentScenes: Math.max(
+      1,
+      Math.min(
+        12,
+        Number(merged.maxConcurrentScenes) || DEFAULT_SETTINGS.maxConcurrentScenes || 5
+      )
+    ),
   };
 }
 

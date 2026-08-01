@@ -10,29 +10,20 @@ import {
   estimateScriptSpokenSeconds,
   formatDurationLabel,
   MAX_TTS_FIT_ATTEMPTS,
-  planSceneChunks,
-  withStylePrompt,
 } from '../../shared/models';
 import type {
   GenerateJobInput,
   GenerateJobResult,
-  ImageFamily,
   JobProgress,
   MediaKind,
+  SceneJobProgress,
   ScriptDraft,
-  VideoFamily,
 } from '../../shared/types';
 import { getKeys, getSettings } from '../store';
 import { resolveProjectChatModel, resolveProjectVoice } from '../../shared/voice';
 import { rewriteNarrationToMatchDuration } from './openai';
-import {
-  downloadFile,
-  extendVideo,
-  generateImage,
-  generateVideo,
-  getImageUrl,
-  waitForMedia,
-} from './snapgen';
+import { generateOneSceneMedia } from './scene-generate';
+import { runPool } from './worker-pool';
 import {
   buildContinuousNarrationText,
   computeSceneTimings,
@@ -45,10 +36,8 @@ import {
   assembleFinalVideo,
   assembleSlideshowFromImages,
   buildNarrationTrack,
-  concatClipFiles,
   getDurationSafe,
   isNanoBananaModel,
-  stripNanoBananaWatermark,
   type NarrationTrackItem,
 } from './ffmpeg';
 import {
@@ -62,10 +51,11 @@ import {
   adoptSceneMedia,
   collectSceneMediaPaths,
   resolveSceneMedia,
-  safeSceneKey,
-  sceneMediaTarget,
 } from './scene-media';
 import { setActiveJobProgress, updateActiveJobMeta } from '../job-state';
+
+const DEFAULT_MAX_CONCURRENT_SCENES = 5;
+const MAX_SCENE_GENERATE_ATTEMPTS = 3;
 
 const RAW_NARRATION_FILE = 'narration-raw.mp3';
 const TIMING_FILE = 'narration-timing.json';
@@ -107,22 +97,20 @@ function emitProgress(progress: JobProgress): void {
   emit(next);
 }
 
-/** Snapgen sometimes returns 0–1; normalize to 0–100. */
-function normalizeSnapgenPercent(raw?: number): number {
-  if (raw == null || Number.isNaN(raw)) return 0;
-  if (raw > 0 && raw <= 1) return Math.round(raw * 100);
-  return Math.min(100, Math.max(0, Math.round(raw)));
-}
-
-/** Media generation spans 12% → 90% of the overall bar. */
-function mediaOverallPercent(
-  sceneIndex: number,
-  sceneTotal: number,
-  sceneLocal01: number
+/** Media generation spans 12% → 90% of the overall bar (theo số scene hoàn tất + local). */
+function mediaOverallPercentFromPool(
+  completedUnits: number,
+  sceneTotal: number
 ): number {
   const n = Math.max(sceneTotal, 1);
-  const local = Math.min(1, Math.max(0, sceneLocal01));
-  return 12 + Math.round(((sceneIndex + local) / n) * 78);
+  const units = Math.min(n, Math.max(0, completedUnits));
+  return 12 + Math.round((units / n) * 78);
+}
+
+function clampConcurrentScenes(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_MAX_CONCURRENT_SCENES;
+  return Math.max(1, Math.min(12, Math.round(n)));
 }
 
 function collectSceneMedia(
@@ -675,7 +663,7 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
     });
 
     const scenes = script.scenes;
-    const mediaPaths: string[] = [];
+    const mediaPaths: string[] = new Array(scenes.length);
     // Give legacy filenames their canonical name first so the cache below hits.
     adoptSceneMedia(projectDir, script, mediaKind);
     const cachedPaths = resolveSceneMedia(projectDir, script, mediaKind);
@@ -683,167 +671,172 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
       ? new Set(input.regenerateSceneIds)
       : null;
 
+    const phase = mediaKind === 'image' ? 'image' : 'video';
+    const label = mediaKind === 'image' ? 'ảnh' : 'video';
+    const maxConcurrent = clampConcurrentScenes(
+      input.maxConcurrentScenes ?? settings.maxConcurrentScenes ?? DEFAULT_MAX_CONCURRENT_SCENES
+    );
+
+    const sceneStatuses: SceneJobProgress[] = scenes.map((scene, index) => ({
+      sceneIndex: index,
+      sceneId: scene.id,
+      state: 'queued',
+      detailPercent: 0,
+    }));
+    const localProgress = new Array(scenes.length).fill(0);
+
+    const emitPoolProgress = (focusIndex?: number) => {
+      const completed = sceneStatuses.filter(
+        (s) => s.state === 'completed' || s.state === 'cached'
+      ).length;
+      const failed = sceneStatuses.filter((s) => s.state === 'failed').length;
+      const active = sceneStatuses.find(
+        (s) =>
+          s.state === 'generating' ||
+          s.state === 'polling' ||
+          s.state === 'retrying'
+      );
+      const units =
+        completed +
+        localProgress.reduce((sum, v, idx) => {
+          const st = sceneStatuses[idx]?.state;
+          if (st === 'generating' || st === 'polling' || st === 'retrying') {
+            return sum + Math.min(1, Math.max(0, v));
+          }
+          return sum;
+        }, 0);
+
+      const focus = focusIndex != null ? sceneStatuses[focusIndex] : active;
+      emitProgress({
+        phase,
+        message: `Worker pool (${maxConcurrent}): ${completed}/${scenes.length} ${label} xong${
+          failed ? ` · ${failed} lỗi` : ''
+        }${
+          focus
+            ? ` · Scene ${focus.sceneIndex + 1} ${focus.state}`
+            : completed >= scenes.length
+              ? ''
+              : ' · đang xếp hàng'
+        }`,
+        sceneIndex: focus?.sceneIndex,
+        sceneTotal: scenes.length,
+        detailPercent: focus?.detailPercent,
+        chunkIndex: focus?.chunkIndex,
+        chunkTotal: focus?.chunkTotal,
+        percent: mediaOverallPercentFromPool(units, scenes.length),
+        scenesCompleted: completed,
+        scenesFailed: failed,
+        maxConcurrent,
+        sceneStatuses: sceneStatuses.map((s) => ({ ...s })),
+      });
+    };
+
+    const workIndexes: number[] = [];
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i];
-      const prompt = withStylePrompt(scene.visual_prompt, input.stylePrompt);
-      const phase = mediaKind === 'image' ? 'image' : 'video';
-      const label = mediaKind === 'image' ? 'ảnh' : 'video';
       const cachedPath = cachedPaths[i];
       const forceThis =
         Boolean(input.forceRegenerate) ||
         (selectedIds != null && selectedIds.has(scene.id));
       if (!forceThis && cachedPath) {
-        emitProgress({
-          phase,
-          message: `Dùng lại ${label} cảnh ${i + 1}/${scenes.length} đã tạo trước đó.`,
-          sceneIndex: i,
-          sceneTotal: scenes.length,
-          percent: mediaOverallPercent(i, scenes.length, 1),
-        });
-        mediaPaths.push(cachedPath);
-        continue;
-      }
-
-      emitProgress({
-        phase,
-        message: `Đang tạo ${label} cảnh ${i + 1}/${scenes.length}...`,
-        sceneIndex: i,
-        sceneTotal: scenes.length,
-        detailPercent: 0,
-        percent: mediaOverallPercent(i, scenes.length, 0),
-      });
-
-      if (mediaKind === 'image') {
-        const job = await generateImage({
-          apiKey: keys.snapgenApiKey,
-          family: input.family as ImageFamily,
-          model: input.model,
-          prompt,
-          aspectRatio: input.aspectRatio,
-          resolution: input.resolution,
-          mode: input.mode,
-        });
-
-        const hist = await waitForMedia(keys.snapgenApiKey, job.uuid, 'image', (pct) => {
-          const shot = normalizeSnapgenPercent(pct);
-          emitProgress({
-            phase: 'image',
-            message: `Đang render ảnh cảnh ${i + 1}/${scenes.length}`,
-            sceneIndex: i,
-            sceneTotal: scenes.length,
-            detailPercent: shot,
-            percent: mediaOverallPercent(i, scenes.length, shot / 100),
-          });
-        });
-
-        const url = getImageUrl(hist);
-        if (!url) throw new Error(`Thiếu image_url cho scene ${i + 1}`);
-
-        const imagePath = sceneMediaTarget(imagesDir, scene.id, 'png');
-        await downloadFile(url, imagePath);
-        if (isNanoBananaModel(input.model)) {
-          await stripNanoBananaWatermark(imagePath);
-        }
-        mediaPaths.push(imagePath);
+        mediaPaths[i] = cachedPath;
+        localProgress[i] = 1;
+        sceneStatuses[i] = {
+          ...sceneStatuses[i],
+          state: 'cached',
+          detailPercent: 100,
+        };
       } else {
-        // Each scene starts as a NEW video (hard cut between scenes).
-        // Only within a long scene do we extend the same clip.
-        const desired = Math.max(1, scene.duration_hint);
-        const plan = planSceneChunks(input.model, String(input.family), desired);
-        const segmentDir = path.join(workDir, `scene-${safeSceneKey(scene.id)}`);
-        fs.mkdirSync(segmentDir, { recursive: true });
-        const segmentPaths: string[] = [];
-        let refHistory: string | null = null;
+        workIndexes.push(i);
+      }
+    }
+    emitPoolProgress();
 
-        for (let c = 0; c < plan.chunks.length; c++) {
-          const chunkDur = plan.chunks[c];
-          const isFirst = c === 0;
-          const chunkPrompt = isFirst
-            ? prompt
-            : plan.mode === 'extend'
-              ? `Continue the same shot seamlessly, no cut, natural motion continuation. ${prompt}`
-              : `New beat of the same scene, hard cut ok, keep visual continuity. ${prompt}`;
-
-          const chunkBase = c / plan.chunks.length;
-          emitProgress({
-            phase: 'video',
-            message:
-              plan.mode === 'extend' && !isFirst
-                ? `Cảnh ${i + 1}/${scenes.length}: extend đoạn ${c + 1}/${plan.chunks.length} (${chunkDur}s)`
-                : plan.chunks.length > 1
-                  ? `Cảnh ${i + 1}/${scenes.length}: gen đoạn ${c + 1}/${plan.chunks.length} (${chunkDur}s)`
-                  : `Đang tạo video cảnh ${i + 1}/${scenes.length} (${chunkDur}s)`,
-            sceneIndex: i,
-            sceneTotal: scenes.length,
-            chunkIndex: c,
-            chunkTotal: plan.chunks.length,
+    if (workIndexes.length) {
+      const settled = await runPool(
+        workIndexes.map((i) => async () => {
+          const scene = scenes[i];
+          sceneStatuses[i] = {
+            ...sceneStatuses[i],
+            state: 'generating',
             detailPercent: 0,
-            percent: mediaOverallPercent(i, scenes.length, chunkBase),
-          });
+            error: undefined,
+          };
+          localProgress[i] = 0;
+          emitPoolProgress(i);
 
-          let histUuid: string;
-          if (plan.mode === 'extend' && !isFirst && refHistory) {
-            const job = await extendVideo({
+          const mediaPath = await generateOneSceneMedia(
+            {
               apiKey: keys.snapgenApiKey,
-              family: input.family as VideoFamily,
-              prompt: chunkPrompt,
-              refHistory,
-              duration: chunkDur,
-              resolution: input.resolution,
-              mode: input.mode,
-            });
-            histUuid = job.uuid;
-          } else {
-            const job = await generateVideo({
-              apiKey: keys.snapgenApiKey,
-              family: input.family as VideoFamily,
+              mediaKind,
+              family: String(input.family),
               model: input.model,
-              prompt: chunkPrompt,
-              duration: chunkDur,
               aspectRatio: input.aspectRatio,
               resolution: input.resolution,
               mode: input.mode,
-            });
-            histUuid = job.uuid;
-          }
+              stylePrompt: input.stylePrompt,
+              imagesDir,
+              clipsDir,
+              workDir,
+              maxAttempts: MAX_SCENE_GENERATE_ATTEMPTS,
+            },
+            scene,
+            i,
+            (update) => {
+              sceneStatuses[i] = {
+                ...sceneStatuses[i],
+                ...update,
+              };
+              if (update.local01 != null) localProgress[i] = update.local01;
+              emitPoolProgress(i);
+            }
+          );
+          mediaPaths[i] = mediaPath;
+          localProgress[i] = 1;
+          sceneStatuses[i] = {
+            ...sceneStatuses[i],
+            state: 'completed',
+            detailPercent: 100,
+            error: undefined,
+          };
+          emitPoolProgress(i);
+          return mediaPath;
+        }),
+        { concurrency: Math.min(maxConcurrent, workIndexes.length) }
+      );
 
-          const hist = await waitForMedia(keys.snapgenApiKey, histUuid, 'video', (pct) => {
-            const shot = normalizeSnapgenPercent(pct);
-            const withinScene = (c + shot / 100) / plan.chunks.length;
-            emitProgress({
-              phase: 'video',
-              message:
-                plan.chunks.length > 1
-                  ? `Cảnh ${i + 1}/${scenes.length} · đoạn ${c + 1}/${plan.chunks.length}`
-                  : `Đang render video cảnh ${i + 1}/${scenes.length}`,
-              sceneIndex: i,
-              sceneTotal: scenes.length,
-              chunkIndex: c,
-              chunkTotal: plan.chunks.length,
-              detailPercent: shot,
-              percent: mediaOverallPercent(i, scenes.length, withinScene),
-            });
-          });
+      const failures: string[] = [];
+      settled.forEach((result, taskIdx) => {
+        const sceneIndex = workIndexes[taskIdx];
+        if (result.status === 'fulfilled') return;
+        const reason =
+          result.reason instanceof Error
+            ? result.reason.message
+            : String(result.reason);
+        sceneStatuses[sceneIndex] = {
+          ...sceneStatuses[sceneIndex],
+          state: 'failed',
+          error: reason,
+          detailPercent: 0,
+        };
+        localProgress[sceneIndex] = 0;
+        failures.push(`Scene ${sceneIndex + 1}: ${reason}`);
+      });
+      emitPoolProgress();
 
-          const url = hist.generated_video?.[0]?.video_url;
-          if (!url) throw new Error(`Thiếu video_url cho scene ${i + 1} đoạn ${c + 1}`);
-          const segPath = path.join(segmentDir, `part-${c + 1}.mp4`);
-          await downloadFile(url, segPath);
-          segmentPaths.push(segPath);
-          refHistory = hist.uuid;
-        }
+      if (failures.length) {
+        throw new Error(
+          `${failures.length}/${workIndexes.length} scene thất bại (các scene khác vẫn chạy xong):\n` +
+            failures.slice(0, 8).join('\n') +
+            (failures.length > 8 ? `\n… và ${failures.length - 8} lỗi khác` : '')
+        );
+      }
+    }
 
-        const clipPath = sceneMediaTarget(clipsDir, scene.id, 'mp4');
-        await concatClipFiles(segmentPaths, clipPath, path.join(segmentDir, 'merge'));
-        mediaPaths.push(clipPath);
-        emitProgress({
-          phase: 'video',
-          message: `Xong video cảnh ${i + 1}/${scenes.length}`,
-          sceneIndex: i,
-          sceneTotal: scenes.length,
-          detailPercent: 100,
-          percent: mediaOverallPercent(i, scenes.length, 1),
-        });
+    // Đảm bảo mọi slot có path trước khi merge.
+    for (let i = 0; i < scenes.length; i++) {
+      if (!mediaPaths[i]) {
+        throw new Error(`Thiếu media cho scene ${i + 1} (${scenes[i].id}).`);
       }
     }
 

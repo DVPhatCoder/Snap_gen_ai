@@ -2173,6 +2173,55 @@ h2 {
   background: linear-gradient(90deg, #5b8def, #7ec8ff);
 }
 
+.scene-job-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  max-height: 180px;
+  overflow: auto;
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.scene-job-item {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.scene-job-item.state-completed,
+.scene-job-item.state-cached {
+  color: #8fd19e;
+}
+
+.scene-job-item.state-failed {
+  color: #f0a0a0;
+}
+
+.scene-job-item.state-retrying {
+  color: #e6c07b;
+}
+
+.scene-job-item.state-polling,
+.scene-job-item.state-generating {
+  color: #9ec1ff;
+}
+
+.scene-job-icon {
+  text-align: center;
+  opacity: 0.9;
+}
+
+.scene-job-state {
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
 .status-dot {
   display: inline-block;
   width: 7px;
