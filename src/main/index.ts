@@ -143,7 +143,9 @@ function registerIpc(): void {
     const keys = getKeys();
     const settings = getSettings();
     if (!keys.openaiApiKey) throw new Error('Thiếu OpenAI API key.');
-    return generateScript(keys.openaiApiKey, settings.openaiModel, input);
+    const chatModel =
+      (input.openaiChatModel || '').trim() || settings.openaiModel || 'gpt-4o-mini';
+    return generateScript(keys.openaiApiKey, chatModel, input);
   });
 
   ipcMain.handle(IPC.startGenerate, async (_e, input: GenerateJobInput) => {

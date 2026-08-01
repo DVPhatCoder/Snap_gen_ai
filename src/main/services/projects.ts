@@ -20,7 +20,7 @@ import type {
   ImageFamily,
 } from '../../shared/types';
 import { DEFAULT_DURATION_PER_SCENE, defaultFamilyForKind, defaultModelIdForKind, getModelById } from '../../shared/models';
-import { resolveProjectVoice, projectDraftHasVoice } from '../../shared/voice';
+import { resolveProjectChatModel, resolveProjectVoice, projectDraftHasVoice } from '../../shared/voice';
 
 const META_FILE = 'meta.json';
 const DRAFT_FILE = 'draft.json';
@@ -96,6 +96,7 @@ function readDraft(id: string): ProjectDraft | null {
     const sceneCount = raw.sceneCount ?? 3;
     const mediaKind = raw.mediaKind ?? 'video';
     const voice = resolveProjectVoice(raw, getSettings());
+    const settings = getSettings();
     const draft: ProjectDraft = {
       brief: raw.brief ?? '',
       language: raw.language ?? 'Tiếng Việt',
@@ -110,10 +111,11 @@ function readDraft(id: string): ProjectDraft | null {
       script: raw.script ?? null,
       mediaKind,
       stylePrompt: raw.stylePrompt ?? '',
+      openaiChatModel: resolveProjectChatModel(raw.openaiChatModel, settings.openaiModel),
       ...voice,
     };
-    // Dự án cũ chưa có voice → snapshot vào draft một lần, khóa theo dự án.
-    if (!projectDraftHasVoice(raw)) {
+    // Dự án cũ chưa có voice / chat model → snapshot vào draft một lần.
+    if (!projectDraftHasVoice(raw) || !raw.openaiChatModel) {
       writeDraft(id, draft);
     }
     return draft;
@@ -261,7 +263,8 @@ export function createProject(input: CreateProjectInput): ProjectMeta {
   };
 
   writeMeta(meta);
-  const voice = resolveProjectVoice(input, getSettings());
+  const settings = getSettings();
+  const voice = resolveProjectVoice(input, settings);
   writeDraft(id, {
     brief: meta.brief ?? '',
     language: meta.language ?? 'Tiếng Việt',
@@ -275,6 +278,7 @@ export function createProject(input: CreateProjectInput): ProjectMeta {
     script: null,
     mediaKind,
     stylePrompt: meta.stylePrompt ?? '',
+    openaiChatModel: resolveProjectChatModel(input.openaiChatModel, settings.openaiModel),
     ...voice,
   });
 
@@ -367,7 +371,8 @@ export function ensureProject(options: {
       existing.stylePrompt = options.stylePrompt ?? existing.stylePrompt ?? '';
       writeMeta(existing);
       const prevDraft = readDraft(options.projectId);
-      const voice = resolveProjectVoice(prevDraft, getSettings());
+      const settings = getSettings();
+      const voice = resolveProjectVoice(prevDraft, settings);
       writeDraft(options.projectId, {
         brief: existing.brief ?? '',
         language: existing.language ?? 'Tiếng Việt',
@@ -382,6 +387,10 @@ export function ensureProject(options: {
         script: options.script,
         mediaKind: existing.mediaKind ?? 'video',
         stylePrompt: existing.stylePrompt ?? '',
+        openaiChatModel: resolveProjectChatModel(
+          prevDraft?.openaiChatModel,
+          settings.openaiModel
+        ),
         ...voice,
       });
       return existing;
@@ -430,6 +439,7 @@ export function ensureProject(options: {
     script: options.script,
     mediaKind: options.mediaKind ?? 'video',
     stylePrompt: options.stylePrompt ?? '',
+    openaiChatModel: resolveProjectChatModel(undefined, getSettings().openaiModel),
     ...voice,
   });
   return created;

@@ -387,14 +387,17 @@ export function withStylePrompt(visualPrompt: string, stylePrompt?: string): str
 /** Fallback when a model has no declared durations (not a hard scene length). */
 export const DEFAULT_DURATION_PER_SCENE = 8;
 
-/** Typical narrative beat used to estimate scene count. */
-export const TYPICAL_NARRATIVE_BEAT_SEC = 10;
-const MIN_NARRATIVE_BEAT_SEC = 8;
-const MAX_NARRATIVE_BEAT_SEC = 24;
+/**
+ * Soft beat guidance — AI chia scene theo ý, không hardcode 8s/15s cố định.
+ * Dùng để gợi ý UI + post-process split/merge.
+ */
+export const MIN_SCENE_BEAT_SEC = 3;
+export const MAX_SCENE_BEAT_SEC = 12;
+export const IDEAL_SCENE_BEAT_SEC = 6;
+/** @deprecated alias — prefer IDEAL_SCENE_BEAT_SEC */
+export const TYPICAL_NARRATIVE_BEAT_SEC = IDEAL_SCENE_BEAT_SEC;
 /** Absolute ceiling for one scene (extend/multi-cut covers model shot limits). */
 export const MAX_SCENE_DURATION_SEC = 180;
-/** Cap scene count so one OpenAI JSON response vẫn khả thi với video dài. */
-export const MAX_SCRIPT_SCENES = 40;
 export const WORDS_PER_SECOND = 2.5;
 /** Narration phải đạt tối thiểu tỉ lệ này so với target trước TTS. */
 export const MIN_NARRATION_COVERAGE = 0.85;
@@ -405,35 +408,31 @@ export const MAX_TTS_FIT_ATTEMPTS = 4;
 
 export interface SceneDurationPlan {
   targetDurationSec: number;
-  /** Suggested / required scene count for UI / draft persistence. */
+  /** Ước lượng mềm cho UI / chi phí — không ép AI đúng số này. */
   sceneCountHint: number;
   sceneCountMin: number;
   sceneCountMax: number;
   typicalBeatSec: number;
-  /** Seconds allocated per scene on average (target / sceneCount). */
+  /** Soft average nếu chia đều — chỉ để hiển thị. */
   secondsPerScene: number;
   /** Total words needed ≈ target * WORDS_PER_SECOND. */
   targetWordCount: number;
 }
 
 /**
- * Tính số scene từ thời lượng mục tiêu ÷ thời lượng mỗi scene.
- * Video dài → tăng beat để số scene ≤ MAX_SCRIPT_SCENES.
+ * Ước lượng mềm số scene từ thời lượng (UI / cost hint).
+ * AI chia theo beat nội dung; không hardcode N scene × T giây.
  */
 export function planScenesFromDuration(
   targetDurationSec: number,
   _legacyDurationPerScene?: number
 ): SceneDurationPlan & { sceneCount: number; durationPerScene: number } {
-  const target = Math.max(MIN_NARRATIVE_BEAT_SEC, Math.round(targetDurationSec));
-  const beatFromCap = Math.ceil(target / MAX_SCRIPT_SCENES);
-  const typicalBeatSec = Math.max(TYPICAL_NARRATIVE_BEAT_SEC, beatFromCap, MIN_NARRATIVE_BEAT_SEC);
+  const target = Math.max(MIN_SCENE_BEAT_SEC * 3, Math.round(targetDurationSec));
+  const typicalBeatSec = IDEAL_SCENE_BEAT_SEC;
   const sceneCountHint = Math.max(3, Math.round(target / typicalBeatSec));
-  const secondsPerScene = Math.max(
-    MIN_NARRATIVE_BEAT_SEC,
-    Math.round((target / sceneCountHint) * 10) / 10
-  );
-  const sceneCountMin = Math.max(3, Math.round(target / MAX_NARRATIVE_BEAT_SEC));
-  const sceneCountMax = Math.max(sceneCountHint, Math.min(MAX_SCRIPT_SCENES, sceneCountHint + 4));
+  const sceneCountMin = Math.max(3, Math.round(target / MAX_SCENE_BEAT_SEC));
+  const sceneCountMax = Math.max(sceneCountHint, Math.round(target / MIN_SCENE_BEAT_SEC));
+  const secondsPerScene = Math.round((target / sceneCountHint) * 10) / 10;
   return {
     targetDurationSec: target,
     sceneCountHint,
@@ -491,9 +490,11 @@ export function assertNarrationCoversTarget(
   const spoken = estimateScriptSpokenSeconds(scenes);
   const target = Math.max(1, Math.round(targetDurationSec));
   if (spoken < target * minRatio) {
+    const needWords = Math.round(target * WORDS_PER_SECOND);
+    const haveWords = Math.round(spoken * WORDS_PER_SECOND);
     throw new Error(
-      `Narration chỉ ~${formatDurationLabel(spoken)} nhưng mục tiêu ${formatDurationLabel(target)}. ` +
-        `Hãy Generate script lại trước khi tạo voiceover / video.`
+      `Narration quá ngắn: ~${formatDurationLabel(spoken)} (~${haveWords} từ) so với mục tiêu ${formatDurationLabel(target)} (~${needWords} từ). ` +
+        `AI chưa viết đủ lời thoại — hãy Generate script lại (hoặc rút ngắn thời lượng video).`
     );
   }
 }
@@ -507,7 +508,7 @@ export function findScenesWithShortNarration<
 >(scenes: T[], minRatio = MIN_NARRATION_COVERAGE): Array<{ index: number; scene: T; spoken: number; planned: number }> {
   const out: Array<{ index: number; scene: T; spoken: number; planned: number }> = [];
   scenes.forEach((scene, index) => {
-    const planned = Math.max(2, Number(scene.duration_hint) || TYPICAL_NARRATIVE_BEAT_SEC);
+    const planned = Math.max(2, Number(scene.duration_hint) || IDEAL_SCENE_BEAT_SEC);
     const spoken = estimateSpokenSeconds(scene.narration_segment || '', 0);
     if (spoken < planned * minRatio) {
       out.push({ index, scene, spoken, planned });
@@ -541,8 +542,8 @@ export interface SceneDurationInput {
 }
 
 /**
- * Phân bổ duration_hint theo mục tiêu tổng.
- * Không rút thời lượng scene vì narration ngắn — lời phải lấp đầy thời lượng, không ngược lại.
+ * Gán duration_hint theo độ dài narration (beat nội dung), rồi scale tổng = target.
+ * Không ép mọi scene cùng một số giây cố định.
  */
 export function normalizeSceneDurations<T extends SceneDurationInput>(
   scenes: T[],
@@ -550,16 +551,16 @@ export function normalizeSceneDurations<T extends SceneDurationInput>(
 ): Array<T & { duration_hint: number }> {
   if (!scenes.length) return [];
 
-  const target = Math.max(scenes.length * 2, Math.round(targetDurationSec));
-  const equal = target / scenes.length;
-
+  const target = Math.max(scenes.length * MIN_SCENE_BEAT_SEC, Math.round(targetDurationSec));
   const weights = scenes.map((scene) => {
+    const fromWords = estimateSpokenSeconds(scene.narration_segment || '', 0);
     const fromHint = Number(scene.duration_hint);
-    const hint = Number.isFinite(fromHint) && fromHint > 0 ? fromHint : equal;
-    // Cho phép AI lệch ±35% quanh mức chia đều; ngoài khoảng thì kéo về equal.
-    const lo = equal * 0.65;
-    const hi = equal * 1.35;
-    return Math.min(hi, Math.max(lo, hint));
+    const hint = Number.isFinite(fromHint) && fromHint > 0 ? fromHint : 0;
+    // Ưu tiên độ dài lời nói (nội dung); hint AI chỉ phụ.
+    if (fromWords > 0 && hint > 0) return Math.max(MIN_SCENE_BEAT_SEC, fromWords * 0.75 + hint * 0.25);
+    if (fromWords > 0) return Math.max(MIN_SCENE_BEAT_SEC, fromWords);
+    if (hint > 0) return Math.max(MIN_SCENE_BEAT_SEC, hint);
+    return IDEAL_SCENE_BEAT_SEC;
   });
 
   const weightSum = weights.reduce((sum, value) => sum + value, 0) || scenes.length;
@@ -567,7 +568,7 @@ export function normalizeSceneDurations<T extends SceneDurationInput>(
     const raw = (weights[index] / weightSum) * target;
     const duration = Math.min(
       MAX_SCENE_DURATION_SEC,
-      Math.max(2, Math.round(raw * 10) / 10)
+      Math.max(MIN_SCENE_BEAT_SEC, Math.round(raw * 10) / 10)
     );
     return { ...scene, duration_hint: duration };
   });
@@ -577,10 +578,54 @@ export function normalizeSceneDurations<T extends SceneDurationInput>(
   const last = assigned[assigned.length - 1];
   last.duration_hint = Math.min(
     MAX_SCENE_DURATION_SEC,
-    Math.max(2, Math.round((last.duration_hint + drift) * 10) / 10)
+    Math.max(MIN_SCENE_BEAT_SEC, Math.round((last.duration_hint + drift) * 10) / 10)
   );
 
   return assigned;
+}
+
+/**
+ * Gộp scene narration quá ngắn (< MIN) vào scene trước nếu cùng chapter/section.
+ */
+export function mergeUndersizedScenes<
+  T extends {
+    id?: string;
+    section?: string;
+    chapter?: string;
+    narration_segment?: string;
+    visual_prompt?: string;
+    duration_hint?: number;
+  },
+>(scenes: T[]): T[] {
+  if (scenes.length < 2) return scenes;
+  const out: T[] = [];
+  for (const scene of scenes) {
+    const spoken = estimateSpokenSeconds(scene.narration_segment || '', 0);
+    const prev = out[out.length - 1];
+    const sameBucket =
+      prev &&
+      (prev.section || '') === (scene.section || '') &&
+      (prev.chapter || '').trim().toLowerCase() === (scene.chapter || '').trim().toLowerCase();
+    if (prev && sameBucket && spoken > 0 && spoken < MIN_SCENE_BEAT_SEC) {
+      prev.narration_segment = `${(prev.narration_segment || '').trim()} ${(scene.narration_segment || '').trim()}`.trim();
+      continue;
+    }
+    out.push({ ...scene });
+  }
+  // Scene cuối quá ngắn → gộp vào trước nếu cùng bucket.
+  if (out.length >= 2) {
+    const last = out[out.length - 1];
+    const prev = out[out.length - 2];
+    const spoken = estimateSpokenSeconds(last.narration_segment || '', 0);
+    const sameBucket =
+      (prev.section || '') === (last.section || '') &&
+      (prev.chapter || '').trim().toLowerCase() === (last.chapter || '').trim().toLowerCase();
+    if (sameBucket && spoken > 0 && spoken < MIN_SCENE_BEAT_SEC) {
+      prev.narration_segment = `${(prev.narration_segment || '').trim()} ${(last.narration_segment || '').trim()}`.trim();
+      out.pop();
+    }
+  }
+  return out;
 }
 
 export function formatDurationLabel(totalSeconds: number): string {

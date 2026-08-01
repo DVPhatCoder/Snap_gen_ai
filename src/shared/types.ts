@@ -22,6 +22,7 @@ export interface ApiKeys {
 }
 
 export interface AppSettings {
+  /** Default model viết kịch bản cho dự án mới (mỗi dự án có thể đổi riêng). */
   openaiModel: string;
   /** Default TTS cho dự án mới (fallback khi draft cũ thiếu). */
   openaiTtsModel: string;
@@ -85,6 +86,11 @@ export interface SceneDraft {
   duration_hint: number;
   /** Phần cấu trúc kịch bản cố định: mở đầu / thân / kết. */
   section?: SceneSection;
+  /**
+   * Chapter nội dung (Opening, Top 10, …). Một chapter gồm nhiều scene beat.
+   * Không phải một scene duy nhất.
+   */
+  chapter?: string;
 }
 
 export interface ScriptDraft {
@@ -110,6 +116,8 @@ export interface GenerateIdeaInput {
   durationPerScene?: number;
   mediaKind: MediaKind;
   stylePrompt?: string;
+  /** Model ChatGPT viết kịch bản theo dự án. */
+  openaiChatModel?: string;
 }
 
 export type ProjectStatus = 'draft' | 'generating' | 'ready' | 'error';
@@ -150,6 +158,8 @@ export interface ProjectDraft {
   script: ScriptDraft | null;
   mediaKind: MediaKind;
   stylePrompt: string;
+  /** Model ChatGPT viết kịch bản — theo từng dự án. */
+  openaiChatModel: string;
   /** Voiceover theo dự án. */
   ttsProvider: 'openai' | 'elevenlabs';
   openaiTtsModel: string;
@@ -189,6 +199,7 @@ export interface CreateProjectInput {
   mode?: string;
   mediaKind?: MediaKind;
   stylePrompt?: string;
+  openaiChatModel?: string;
   ttsProvider?: 'openai' | 'elevenlabs';
   openaiTtsModel?: string;
   openaiTtsVoice?: string;
@@ -379,6 +390,15 @@ export const OPENAI_TTS_VOICES = [
 ] as const;
 
 export const OPENAI_TTS_MODELS = ['gpt-4o-mini-tts', 'tts-1-hd', 'tts-1'] as const;
+
+/** Model ChatGPT dùng để viết kịch bản (không phải model Snapgen video/ảnh). */
+export const OPENAI_CHAT_MODELS = [
+  { id: 'gpt-4o-mini', label: 'GPT-4o mini (nhanh, rẻ)' },
+  { id: 'gpt-4o', label: 'GPT-4o (khuyên dùng video dài)' },
+  { id: 'gpt-4.1-mini', label: 'GPT-4.1 mini' },
+  { id: 'gpt-4.1', label: 'GPT-4.1' },
+  { id: 'o4-mini', label: 'o4-mini' },
+] as const;
 
 export const ELEVENLABS_TTS_MODELS = [
   'eleven_flash_v2_5',

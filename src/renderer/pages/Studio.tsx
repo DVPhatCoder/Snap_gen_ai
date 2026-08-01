@@ -29,7 +29,8 @@ import ExportDialog, { buildExportableScenes } from '../components/ExportDialog'
 import GenerateScenesDialog from '../components/GenerateScenesDialog';
 import ProjectVoicePanel from '../components/ProjectVoicePanel';
 import type { ProjectVoiceSettings } from '../../shared/types';
-import { DEFAULT_PROJECT_VOICE, resolveProjectVoice } from '../../shared/voice';
+import { OPENAI_CHAT_MODELS } from '../../shared/types';
+import { DEFAULT_PROJECT_VOICE, resolveProjectChatModel, resolveProjectVoice } from '../../shared/voice';
 
 const DURATION_PRESETS_MIN = [0.5, 1, 2, 3, 5, 10, 15] as const;
 const DEFAULT_DURATION_MIN = 1;
@@ -97,6 +98,7 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
   const [resolution, setResolution] = useState('720p');
   const [mode, setMode] = useState('');
   const [script, setScript] = useState<ScriptDraft | null>(null);
+  const [openaiChatModel, setOpenaiChatModel] = useState('gpt-4o-mini');
   const [sceneMedia, setSceneMedia] = useState<SceneMediaAsset[]>([]);
   const [selectedScene, setSelectedScene] = useState(0);
   const [previewMode, setPreviewMode] = useState<'scene' | 'final'>('scene');
@@ -361,7 +363,10 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
 
   useEffect(() => {
     if (!projectId) {
-      void window.studio.getSettings().then((s) => setVoice(resolveProjectVoice(null, s)));
+      void window.studio.getSettings().then((s) => {
+        setVoice(resolveProjectVoice(null, s));
+        setOpenaiChatModel(resolveProjectChatModel(null, s.openaiModel));
+      });
       return;
     }
     void (async () => {
@@ -387,10 +392,14 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
           setStylePrompt(draft.stylePrompt ?? '');
           setScript(draft.script);
           setVoice(resolveProjectVoice(draft));
+          setOpenaiChatModel(
+            resolveProjectChatModel(draft.openaiChatModel, undefined)
+          );
           if (draft.script) setActiveTool('script');
         } else {
           const s = await window.studio.getSettings();
           setVoice(resolveProjectVoice(null, s));
+          setOpenaiChatModel(resolveProjectChatModel(null, s.openaiModel));
         }
         if (detail.videoPath) {
           setResult({
@@ -511,6 +520,7 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
     script: nextScript,
     mediaKind,
     stylePrompt,
+    openaiChatModel,
     ...(voiceOverride ?? voice),
   });
 
@@ -538,11 +548,42 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
       mode: mode || undefined,
       mediaKind,
       stylePrompt,
+      openaiChatModel,
       ...nextVoice,
     });
     setActiveProjectId(meta.id);
     onProjectReady(meta.id);
     return meta.id;
+  };
+
+  const persistProjectChatModel = async (nextModel: string): Promise<void> => {
+    const name = projectName.trim() || 'Untitled project';
+    if (activeProjectId) {
+      await window.studio.saveProjectDraft(
+        activeProjectId,
+        { ...draftPayload(script), openaiChatModel: nextModel },
+        { name }
+      );
+      return;
+    }
+    const meta = await window.studio.createProject({
+      name,
+      brief,
+      language,
+      sceneCount: scenePlan.sceneCountHint,
+      targetDurationSec: scenePlan.targetDurationSec,
+      family: family as VideoFamily | ImageFamily,
+      model: modelId,
+      aspectRatio,
+      resolution,
+      mode: mode || undefined,
+      mediaKind,
+      stylePrompt,
+      openaiChatModel: nextModel,
+      ...voice,
+    });
+    setActiveProjectId(meta.id);
+    onProjectReady(meta.id);
   };
 
   const onVoiceChange = (next: ProjectVoiceSettings) => {
@@ -580,6 +621,7 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
       mode: mode || undefined,
       mediaKind,
       stylePrompt,
+      openaiChatModel,
       ...v,
     });
     setActiveProjectId(meta.id);
@@ -810,6 +852,7 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
         maxShotSec,
         mediaKind,
         stylePrompt: stylePrompt.trim() || undefined,
+        openaiChatModel,
       });
       setScript(draft);
       setSelectedScene(0);
@@ -817,9 +860,12 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
         name: projectName.trim() || 'Untitled project',
       });
       const spoken = estimateScriptSpokenSeconds(draft.scenes);
+      const chapterCount = new Set(
+        draft.scenes.map((s) => (s.chapter || '').trim()).filter(Boolean)
+      ).size;
       setToast({
         type: 'ok',
-        text: `Script sẵn sàng: ${draft.scenes.length} scene · lời thoại ~${formatDurationLabel(spoken)} (mục tiêu ${formatDurationLabel(scenePlan.targetDurationSec)}).`,
+        text: `Script sẵn sàng: ${chapterCount ? `${chapterCount} chapter · ` : ''}${draft.scenes.length} scene · lời ~${formatDurationLabel(spoken)} (mục tiêu ${formatDurationLabel(scenePlan.targetDurationSec)}).`,
       });
       setActiveTool('script');
     } catch (err) {
@@ -968,8 +1014,8 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
             <div className="duration-field-head">
               <label htmlFor="target-duration">Thời lượng video</label>
               <span className="duration-field-live">
-                {formatDurationLabel(scenePlan.targetDurationSec)} · {scenePlan.sceneCountHint}{' '}
-                scene · ~{scenePlan.secondsPerScene}s/scene
+                {formatDurationLabel(scenePlan.targetDurationSec)} · AI chia scene theo beat
+                (ước ~{scenePlan.sceneCountHint})
               </span>
             </div>
             <div className="duration-presets" role="group" aria-label="Preset thời lượng">
@@ -1003,10 +1049,10 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
                 <span className="duration-unit">phút</span>
               </div>
               <p id="duration-hint" className="hint duration-hint">
-                Số scene = thời lượng ÷ ~{scenePlan.typicalBeatSec}s/scene. Narration phải đủ dài
-                khớp mục tiêu trước khi tạo voice.
+                Chỉ chọn thời lượng — AI tự chia Chapter → Scene theo ý nội dung (không cố định
+                8s/scene). Narration khớp từng beat.
                 {mediaKind === 'video' ? ` · >${maxShotSec}s dùng Extend` : ''}.
-                {scenePlan.sceneCountHint > 12 ? ' Chi phí tăng khi nhiều scene.' : ''}
+                {scenePlan.sceneCountHint > 20 ? ' Video dài → nhiều scene, chi phí tăng.' : ''}
               </p>
             </div>
           </div>
@@ -1025,6 +1071,44 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
             onResolutionChange={setResolution}
             onModeChange={setMode}
           />
+          <p className="hint">
+            Model ở trên là Snapgen tạo {mediaKind === 'image' ? 'ảnh' : 'video'} — không phải model viết
+            kịch bản.
+          </p>
+
+          <div className="field compact-field">
+            <label htmlFor="script-chat-model">Model viết kịch bản (theo dự án)</label>
+            <select
+              id="script-chat-model"
+              value={openaiChatModel}
+              onChange={(event) => {
+                const next = event.target.value;
+                setOpenaiChatModel(next);
+                void (async () => {
+                  try {
+                    await persistProjectChatModel(next);
+                  } catch (err) {
+                    setToast({
+                      type: 'error',
+                      text: err instanceof Error ? err.message : 'Không lưu được model kịch bản.',
+                    });
+                  }
+                })();
+              }}
+            >
+              {OPENAI_CHAT_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+              {!OPENAI_CHAT_MODELS.some((m) => m.id === openaiChatModel) && (
+                <option value={openaiChatModel}>{openaiChatModel}</option>
+              )}
+            </select>
+            <p className="hint">
+              Lưu theo dự án (giống giọng đọc). Video dài nên chọn GPT-4o. API key vẫn ở Settings.
+            </p>
+          </div>
 
           <div className="voice-inline-block">
             <div className="field compact-field">
@@ -1083,6 +1167,7 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
                     <span className="scene-list-copy">
                       <strong>
                         Scene {index + 1}
+                        {scene.chapter ? ` · ${scene.chapter}` : ''}
                         {scene.section === 'introduction'
                           ? ' · Intro'
                           : scene.section === 'conclusion'

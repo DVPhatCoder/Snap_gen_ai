@@ -66,10 +66,23 @@ export default function SceneEditor({ script, onChange, modelId, mediaKind }: Pr
       {script.scenes.map((scene, index) => (
         <div className="scene-card" key={scene.id}>
           <div className="scene-head">
-            <strong>Cảnh {index + 1}</strong>
+            <strong>
+              Cảnh {index + 1}
+              {scene.chapter ? ` · ${scene.chapter}` : ''}
+            </strong>
             <button type="button" className="btn ghost" onClick={() => removeScene(index)}>
               Xóa
             </button>
+          </div>
+          <div className="field">
+            <label>Chapter</label>
+            <input
+              value={scene.chapter || ''}
+              placeholder="Opening, Top 10, …"
+              onChange={(e) =>
+                updateScene(index, { chapter: e.target.value.trim() || undefined })
+              }
+            />
           </div>
           <div className="field">
             <label>{mediaKind === 'image' ? 'Image prompt (Snapgen)' : 'Visual prompt (Snapgen)'}</label>

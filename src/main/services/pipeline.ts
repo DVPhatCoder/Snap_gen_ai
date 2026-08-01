@@ -23,7 +23,7 @@ import type {
   VideoFamily,
 } from '../../shared/types';
 import { getKeys, getSettings } from '../store';
-import { resolveProjectVoice } from '../../shared/voice';
+import { resolveProjectChatModel, resolveProjectVoice } from '../../shared/voice';
 import { rewriteNarrationToMatchDuration } from './openai';
 import {
   downloadFile,
@@ -632,7 +632,10 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
           workDir,
           script: input.script,
           apiKey: keys.openaiApiKey,
-          openaiModel: settings.openaiModel,
+          openaiModel: resolveProjectChatModel(
+            getProject(meta.id).draft?.openaiChatModel,
+            settings.openaiModel
+          ),
           voice: voice.openaiTtsVoice,
           ttsModel: voice.openaiTtsModel,
           language: input.language,

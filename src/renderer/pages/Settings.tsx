@@ -6,7 +6,7 @@ import type {
   UsageHistorySnapshot,
   UsageSnapshot,
 } from '../../shared/types';
-import { ELEVENLABS_TTS_MODELS, OPENAI_TTS_MODELS, OPENAI_TTS_VOICES } from '../../shared/types';
+import { ELEVENLABS_TTS_MODELS, OPENAI_CHAT_MODELS, OPENAI_TTS_MODELS, OPENAI_TTS_VOICES } from '../../shared/types';
 import UsageQuotaPanel from '../components/UsageQuotaPanel';
 import UsageHistoryPanel from '../components/UsageHistoryPanel';
 
@@ -467,12 +467,39 @@ export default function Settings() {
         )}
 
         <div className="field">
-          <label htmlFor="omodel">Chat model (kịch bản)</label>
-          <input
+          <label htmlFor="omodel">Model viết kịch bản mặc định (dự án mới)</label>
+          <select
             id="omodel"
+            value={
+              OPENAI_CHAT_MODELS.some((m) => m.id === settings.openaiModel)
+                ? settings.openaiModel
+                : '__custom__'
+            }
+            onChange={(e) => {
+              const value = e.target.value;
+              if (value === '__custom__') return;
+              setSettings({ ...settings, openaiModel: value });
+            }}
+          >
+            {OPENAI_CHAT_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+            {!OPENAI_CHAT_MODELS.some((m) => m.id === settings.openaiModel) && (
+              <option value="__custom__">{settings.openaiModel} (tùy chỉnh)</option>
+            )}
+          </select>
+          <input
+            className="mt-2"
             value={settings.openaiModel}
-            onChange={(e) => setSettings({ ...settings, openaiModel: e.target.value })}
+            onChange={(e) => setSettings({ ...settings, openaiModel: e.target.value.trim() })}
+            placeholder="Hoặc gõ model id tùy chỉnh, vd gpt-4o"
+            aria-label="OpenAI chat model id mặc định"
           />
+          <p className="hint">
+            Chỉ áp dụng khi tạo dự án mới. Mỗi dự án đổi riêng trong Studio → AI Create.
+          </p>
         </div>
       </section>
 

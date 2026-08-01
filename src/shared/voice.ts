@@ -1,5 +1,16 @@
 import type { AppSettings, ProjectVoiceSettings } from './types';
 
+export const DEFAULT_OPENAI_CHAT_MODEL = 'gpt-4o-mini';
+
+/** Model viết kịch bản theo dự án; fallback Settings → default. */
+export function resolveProjectChatModel(
+  draftModel?: string | null,
+  settingsDefault?: string | null
+): string {
+  const value = String(draftModel || settingsDefault || DEFAULT_OPENAI_CHAT_MODEL).trim();
+  return value || DEFAULT_OPENAI_CHAT_MODEL;
+}
+
 export const DEFAULT_PROJECT_VOICE: ProjectVoiceSettings = {
   ttsProvider: 'openai',
   openaiTtsModel: 'gpt-4o-mini-tts',
