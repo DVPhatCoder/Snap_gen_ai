@@ -3,13 +3,18 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ElevenLabsVoice } from '../../shared/types';
 import type { TranscriptWord } from './openai-audio';
-import { elevenLabsFetch, getElevenLabsSessionStatus } from './elevenlabs-auth';
+import { elevenLabsFetch, getElevenLabsCookieHeader, getElevenLabsSessionStatus } from './elevenlabs-auth';
+import { getCapturedElevenLabsAuthorization } from '../store';
 import {
   ElevenLabsKeyManager,
   formatElevenLabsKeysUnavailableError,
+  isElevenLabsLibraryFreeBlocked,
 } from './api-keys/elevenlabs-key-manager';
+import { loadElevenLabsKeyRecords } from './api-keys/elevenlabs-keys-store';
 import {
+  addLibraryVoiceByIdOrUrl,
   elevenLabsFetchWithKey,
+  ensureLibraryVoiceOnAllApiKeys,
   ensureLibraryVoiceOnApiKey,
   fetchVoiceShareMeta,
   searchLibraryShareMeta,
@@ -128,6 +133,51 @@ async function ensureLoggedIn(): Promise<void> {
   }
 }
 
+/**
+ * TTS bằng session web (Cookie / Bearer đã login) — giống dùng trên website Free.
+ * Free API key bị chặn Library; session web đôi khi vẫn TTS được giọng Library free.
+ */
+async function fetchTtsWithWebSession(
+  url: string,
+  body: Record<string, unknown>
+): Promise<TtsWithTimestampsResponse | null> {
+  const auth = getCapturedElevenLabsAuthorization().trim();
+  const cookie = (await getElevenLabsCookieHeader()).trim();
+  if (!auth && !cookie) return null;
+
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  };
+  if (auth) {
+    headers.Authorization = /^Bearer\s+/i.test(auth) ? auth : `Bearer ${auth}`;
+  }
+  if (cookie) headers.Cookie = cookie;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  const data = (await res.json()) as TtsWithTimestampsResponse;
+  if (!res.ok || !data.audio_base64) return null;
+  return data;
+}
+
+function writeTtsResult(
+  data: TtsWithTimestampsResponse,
+  options: { outDir: string; fileName?: string; modelId: string }
+): { audioPath: string; srtPath: string; words: TranscriptWord[]; modelId: string } {
+  const audioPath = path.join(options.outDir, options.fileName || 'narration.mp3');
+  fs.writeFileSync(audioPath, Buffer.from(data.audio_base64!, 'base64'));
+  const words = alignmentToWords(data.normalized_alignment || data.alignment);
+  const srtPath = path.join(options.outDir, 'subs.srt');
+  fs.writeFileSync(srtPath, wordsToSrt(words), 'utf8');
+  return { audioPath, srtPath, words, modelId: options.modelId };
+}
+
 /** ISO 639-1 from Studio language label. */
 export function resolveElevenLabsLanguageCode(language?: string): string | undefined {
   if (!language?.trim()) return undefined;
@@ -174,7 +224,24 @@ export function resolveElevenLabsModelForLanguage(
 
 export async function listElevenLabsVoices(): Promise<ElevenLabsVoice[]> {
   await ensureLoggedIn();
-  const res = await elevenLabsFetch('https://api.elevenlabs.io/v1/voices');
+
+  let res: Response;
+  try {
+    res = await elevenLabsFetch('https://api.elevenlabs.io/v1/voices');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!/All ElevenLabs API Keys are unavailable/i.test(msg)) throw err;
+    const fallback = loadElevenLabsKeyRecords()
+      .filter((k) => k.enabled && k.status !== 'disabled' && /^(sk_|xi_)/i.test(k.apiKey))
+      .sort((a, b) => a.priority - b.priority)[0];
+    if (!fallback) {
+      throw new Error(
+        `${msg} Key đang Invalid/Exhausted. Vào Settings → Reset Status (tắt VPN) rồi thử lại.`
+      );
+    }
+    res = await elevenLabsFetchWithKey(fallback.apiKey, 'https://api.elevenlabs.io/v1/voices');
+  }
+
   const data = (await res.json()) as {
     voices?: Array<{
       voice_id?: string;
@@ -198,7 +265,23 @@ export async function listElevenLabsVoices(): Promise<ElevenLabsVoice[]> {
     throw new Error(`Không lấy được danh sách voice ElevenLabs: HTTP ${res.status} ${detail}`);
   }
 
-  return (data.voices ?? [])
+  return mapVoiceList(data.voices ?? []);
+}
+
+function mapVoiceList(
+  voices: Array<{
+    voice_id?: string;
+    name?: string;
+    preview_url?: string;
+    category?: string;
+    labels?: Record<string, string>;
+    sharing?: {
+      public_owner_id?: string;
+      original_voice_id?: string;
+    };
+  }>
+): ElevenLabsVoice[] {
+  return voices
     .filter((v) => v.voice_id && v.name)
     .map((v) => ({
       voiceId: v.voice_id!,
@@ -212,10 +295,9 @@ export async function listElevenLabsVoices(): Promise<ElevenLabsVoice[]> {
     .sort((a, b) => {
       const score = (v: ElevenLabsVoice) => {
         const cat = (v.category || '').toLowerCase();
-        // Free API: premade OK; library thường bị 402.
         if (cat === 'premade') return 0;
         if (cat === 'cloned' || cat === 'generated' || cat === 'professional') return 1;
-        if (cat === 'library') return 9;
+        if (cat === 'library') return 4;
         const blob = `${v.name} ${Object.values(v.labels || {}).join(' ')}`.toLowerCase();
         if (/(vietnam|vietnamese|tiếng việt|viet)/.test(blob)) return 2;
         return 3;
@@ -267,10 +349,32 @@ export async function synthesizeWithElevenLabs(options: {
 
   const tried = new Set<string>();
   let lastDetail = '';
+  let syncedAllKeys = false;
 
   for (;;) {
     const record = await ElevenLabsKeyManager.getAvailableKey(tried);
     if (!record) {
+      // Hết key API — thử lần cuối bằng session web (Library free trên website).
+      if (isElevenLabsLibraryFreeBlocked(lastDetail) || /library voices/i.test(lastDetail)) {
+        const voiceIdForWeb = selectedVoiceId;
+        const webUrl = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceIdForWeb)}/with-timestamps?output_format=mp3_44100_128`;
+        const webData = await fetchTtsWithWebSession(webUrl, body);
+        if (webData?.audio_base64) {
+          return writeTtsResult(webData, {
+            outDir: options.outDir,
+            fileName: options.fileName,
+            modelId,
+          });
+        }
+        throw new Error(
+          formatElevenLabsKeysUnavailableError(
+            lastDetail,
+            `Giọng «${options.voiceName || selectedVoiceId}» vẫn được giữ. ` +
+              `Đã thử session web nhưng chưa được — vào Settings → Đăng nhập ElevenLabs (mở web app), ` +
+              `dùng Speech Synthesis một lần để app bắt session, rồi Generate lại.`
+          )
+        );
+      }
       throw new Error(
         formatElevenLabsKeysUnavailableError(
           lastDetail,
@@ -292,7 +396,20 @@ export async function synthesizeWithElevenLabs(options: {
           }));
       }
 
-      // Library → tự Add vào account của key này nếu chưa có (cùng giọng, có thể khác voice_id).
+      // Add 1 lần trên 1 account → sync cùng giọng sang mọi API key (account khác).
+      if (shareMeta?.publicOwnerId && !syncedAllKeys) {
+        const allKeys = loadElevenLabsKeyRecords()
+          .filter((k) => k.enabled && k.status !== 'disabled')
+          .map((k) => ({ id: k.id, apiKey: k.apiKey }));
+        await ensureLibraryVoiceOnAllApiKeys({
+          keys: allKeys,
+          selectedVoiceId,
+          meta: shareMeta,
+        });
+        syncedAllKeys = true;
+      }
+
+      // Library → dùng voice_id trên account của key này (có thể khác ID sau Add).
       let effectiveVoiceId = selectedVoiceId;
       if (shareMeta?.publicOwnerId) {
         const ensured = await ensureLibraryVoiceOnApiKey({
@@ -369,7 +486,16 @@ export async function synthesizeWithElevenLabs(options: {
       }
 
       if (res.status === 402 && /library voices/i.test(detail)) {
-        // Gói Free không TTS Library — thử key khác (có thể paid), không đổi giọng.
+        // Free API key bị chặn Library → thử session web (như dùng trên website Free).
+        const webData = await fetchTtsWithWebSession(url, body);
+        if (webData?.audio_base64) {
+          ElevenLabsKeyManager.markReady(record.id);
+          return writeTtsResult(webData, {
+            outDir: options.outDir,
+            fileName: options.fileName,
+            modelId,
+          });
+        }
         ElevenLabsKeyManager.markReady(record.id);
         tried.add(record.id);
         continue;
@@ -422,3 +548,90 @@ export const ELEVENLABS_TTS_MODELS = [
   'eleven_v3',
   'eleven_multilingual_v2',
 ] as const;
+
+/** Add Voice Library bằng ID/URL — không cần lên web. Sync mọi API key. */
+export async function addElevenLabsLibraryVoice(input: {
+  voiceIdOrUrl: string;
+  newName?: string;
+}): Promise<{
+  voiceId: string;
+  libraryVoiceId: string;
+  publicOwnerId: string;
+  name: string;
+  syncedKeys: number;
+  message: string;
+  voices: ElevenLabsVoice[];
+}> {
+  await ensureLoggedIn();
+  const records = loadElevenLabsKeyRecords()
+    .filter((k) => k.enabled && k.status !== 'disabled' && /^(sk_|xi_)/i.test(k.apiKey))
+    .sort((a, b) => a.priority - b.priority);
+
+  if (!records.length) {
+    throw new Error('Chưa có API key ElevenLabs. Vào Settings → thêm key sk_…/xi_…');
+  }
+
+  const allInvalid = records.every((k) => k.status === 'invalid' || k.status === 'exhausted');
+  if (allInvalid) {
+    // Vẫn thử Add bằng key hiện có; cảnh báo Reset nếu ElevenLabs đã khóa Free Tier.
+  }
+
+  const keys = records.map((k) => ({ id: k.id, apiKey: k.apiKey }));
+
+  let result: Awaited<ReturnType<typeof addLibraryVoiceByIdOrUrl>>;
+  try {
+    result = await addLibraryVoiceByIdOrUrl({
+      input: input.voiceIdOrUrl,
+      newName: input.newName,
+      keys,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (
+      /unusual activity|free tier access has been disabled|All ElevenLabs API Keys are unavailable/i.test(
+        msg
+      ) ||
+      allInvalid
+    ) {
+      throw new Error(
+        `${msg} Key đang Invalid/Exhausted. Vào Settings → Reset Status (tắt VPN), ` +
+          `hoặc thêm API key account khác còn dùng được, rồi Add theo ID lại.`
+      );
+    }
+    throw err;
+  }
+
+  // List bằng đúng key vừa Add — không qua pool (tránh fail khi mọi key Invalid).
+  let voices: ElevenLabsVoice[] = [];
+  try {
+    const res = await elevenLabsFetchWithKey(keys[0].apiKey, 'https://api.elevenlabs.io/v1/voices');
+    const data = (await res.json()) as {
+      voices?: Array<{
+        voice_id?: string;
+        name?: string;
+        preview_url?: string;
+        category?: string;
+        labels?: Record<string, string>;
+        sharing?: { public_owner_id?: string; original_voice_id?: string };
+      }>;
+    };
+    if (res.ok) voices = mapVoiceList(data.voices ?? []);
+    else voices = await listElevenLabsVoices().catch(() => []);
+  } catch {
+    voices = await listElevenLabsVoices().catch(() => []);
+  }
+
+  return {
+    voiceId: result.voiceId,
+    libraryVoiceId: result.libraryVoiceId,
+    publicOwnerId: result.publicOwnerId,
+    name: result.name,
+    syncedKeys: result.syncedKeys,
+    message:
+      result.voicesHint +
+      (allInvalid
+        ? ' Lưu ý: key đang Invalid — Reset Status trước khi Generate TTS.'
+        : ''),
+    voices,
+  };
+}

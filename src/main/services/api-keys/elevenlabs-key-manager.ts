@@ -160,11 +160,54 @@ export class ElevenLabsKeyManager {
       const text = await res.text();
       if (!res.ok) {
         this.applyHttpFailure(id, res.status, text);
+        if (isElevenLabsFreeTierDisabled(text)) {
+          return {
+            ok: false,
+            message:
+              'ElevenLabs đã khóa Free Tier trên account này (VPN / nhiều account free). ' +
+              'Reset Status trong app không mở khóa được. Cần: account/key khác chưa bị khóa, ' +
+              'gói trả phí, hoặc OpenAI TTS trong dự án.',
+          };
+        }
         return {
           ok: false,
           message: `HTTP ${res.status}: ${text.slice(0, 180)}`,
         };
       }
+
+      // Key hợp lệ với /user — thử TTS ngắn để phát hiện khóa Free / Library.
+      const probe = await fetch(
+        'https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM',
+        {
+          method: 'POST',
+          headers: {
+            Accept: 'audio/mpeg',
+            'Content-Type': 'application/json',
+            'xi-api-key': target.apiKey,
+          },
+          body: JSON.stringify({
+            text: 'Hi.',
+            model_id: 'eleven_flash_v2_5',
+          }),
+        }
+      );
+      if (!probe.ok) {
+        const probeText = await probe.text();
+        this.applyHttpFailure(id, probe.status, probeText);
+        if (isElevenLabsFreeTierDisabled(probeText)) {
+          return {
+            ok: false,
+            message:
+              'Key đăng nhập được nhưng Free Tier TTS đã bị ElevenLabs khóa. ' +
+              'Reset không giúp. Đổi OpenAI TTS hoặc dùng API key/account khác (trả phí hoặc free chưa bị khóa).',
+          };
+        }
+        return {
+          ok: false,
+          message: `User OK nhưng TTS fail HTTP ${probe.status}: ${probeText.slice(0, 160)}`,
+        };
+      }
+
       this.markSuccess(id);
       let email = '';
       try {
@@ -174,7 +217,7 @@ export class ElevenLabsKeyManager {
       }
       return {
         ok: true,
-        message: email ? `OK · ${email}` : 'API key hợp lệ.',
+        message: email ? `OK · ${email} · TTS premade được` : 'API key hợp lệ · TTS premade được.',
       };
     } catch (err) {
       return {
@@ -234,19 +277,38 @@ export function isElevenLabsFreeTierDisabled(detail: string): boolean {
   );
 }
 
+/** Free không TTS được Voice Library qua API. */
+export function isElevenLabsLibraryFreeBlocked(detail: string): boolean {
+  return /free users cannot use library voices|library voices via the api|upgrade your subscription to use this voice/i.test(
+    detail || ''
+  );
+}
+
 export function formatElevenLabsKeysUnavailableError(detail: string, voiceHint?: string): string {
   const voicePart = voiceHint ? ` ${voiceHint}` : '';
+  const statuses = summarizeElevenLabsKeyStatuses();
+
+  if (isElevenLabsLibraryFreeBlocked(detail)) {
+    return (
+      `Giọng «Library» (kể cả miễn phí trên web) không TTS được bằng gói Free API.${voicePart} ` +
+      `ElevenLabs cho nghe/dùng trên trang web, nhưng API Free vẫn từ chối mọi voice category=library ` +
+      `(lỗi: Free users cannot use library voices via the API) — không phải hết token, không phải giọng trả phí. ` +
+      `Trong SnapGen chỉ còn: (1) chọn giọng premade (Rachel, Adam…), (2) OpenAI TTS, ` +
+      `(3) key gói Starter+ nếu muốn đúng giọng Library qua API. ` +
+      `Đổi key Free khác cũng không được. Trạng thái key: ${statuses}.`
+    );
+  }
+
   if (isElevenLabsFreeTierDisabled(detail)) {
     return (
       `ElevenLabs đã khóa Free Tier trên (các) API key hiện tại vì phát hiện bất thường ` +
       `(VPN/proxy hoặc nhiều tài khoản free).${voicePart} ` +
       `Cách xử lý: (1) tắt VPN/proxy rồi thử lại, (2) thêm API key gói trả phí (Starter+), ` +
       `(3) hoặc chuyển dự án sang OpenAI TTS. ` +
-      `Thêm key free mới cùng kiểu thường vẫn bị chặn.`
+      `Thêm key free mới cùng kiểu thường vẫn bị chặn. Trạng thái: ${statuses}.`
     );
   }
 
-  const statuses = summarizeElevenLabsKeyStatuses();
   const isQuota =
     /quota_exceeded|exceeds your quota|credits remaining|insufficient.{0,20}credit/i.test(
       detail || ''

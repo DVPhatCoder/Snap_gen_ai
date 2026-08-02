@@ -27,7 +27,7 @@ import {
   saveElevenLabsApiKeyManually,
   testElevenLabsSession,
 } from './services/elevenlabs-auth';
-import { listElevenLabsVoices, previewElevenLabsVoice } from './services/elevenlabs-tts';
+import { listElevenLabsVoices, previewElevenLabsVoice, addElevenLabsLibraryVoice } from './services/elevenlabs-tts';
 import { ElevenLabsKeyManager } from './services/api-keys/elevenlabs-key-manager';
 import { listElevenLabsKeysPublic } from './services/api-keys/elevenlabs-keys-store';
 import { getUsageSnapshot, getUsageHistory, loadMoreUsageHistory } from './services/usage';
@@ -160,6 +160,11 @@ function registerIpc(): void {
     IPC.elevenLabsPreviewVoice,
     async (_e, input: { voiceId: string; modelId?: string; language?: string }) =>
       previewElevenLabsVoice(input)
+  );
+  ipcMain.handle(
+    IPC.elevenLabsAddLibraryVoice,
+    async (_e, input: { voiceIdOrUrl: string; newName?: string }) =>
+      addElevenLabsLibraryVoice(input)
   );
 
   onElevenLabsSessionChange((status) => {

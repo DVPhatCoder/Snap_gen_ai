@@ -144,9 +144,31 @@ export default function ElevenLabsVoicePicker({
       if (!voiceMatchesLanguage(v, langFilter)) return false;
       if (!voiceMatchesAccent(v, accentFilter)) return false;
       if (!q) return true;
-      return voiceBlob(v).includes(q);
+      // Cho phép dán voiceId URL Library (original) hoặc id sau khi Add.
+      return (
+        voiceBlob(v).includes(q) ||
+        v.voiceId.toLowerCase().includes(q) ||
+        (v.originalVoiceId || '').toLowerCase().includes(q)
+      );
     });
   }, [voices, query, langFilter, accentFilter, includeLibrary]);
+
+  const filtersActive =
+    langFilter !== 'all' || accentFilter !== 'all' || query.trim().length > 0 || !includeLibrary;
+
+  const clearFilters = () => {
+    setLangFilter('all');
+    setAccentFilter('all');
+    setQuery('');
+    setIncludeLibrary(true);
+  };
+
+  /** Giọng đang chọn bị filter ẩn → vẫn hiện ở đầu list để đổi được. */
+  const listVoices = useMemo(() => {
+    if (!selected) return filtered;
+    if (filtered.some((v) => v.voiceId === selected.voiceId)) return filtered;
+    return [selected, ...filtered];
+  }, [filtered, selected]);
 
   useEffect(() => {
     return () => {
@@ -243,15 +265,27 @@ export default function ElevenLabsVoicePicker({
             onChange={setAccentFilter}
           />
         </div>
-        <label className="el-voice-library-toggle">
-          <input
-            type="checkbox"
-            checked={includeLibrary}
-            disabled={disabled}
-            onChange={(e) => setIncludeLibrary(e.target.checked)}
-          />
-          <span>Hiện Voice Library đã Add ({libraryHidden})</span>
-        </label>
+        <div className="el-voice-filter-actions">
+          <label className="el-voice-library-toggle">
+            <input
+              type="checkbox"
+              checked={includeLibrary}
+              disabled={disabled}
+              onChange={(e) => setIncludeLibrary(e.target.checked)}
+            />
+            <span>Hiện Voice Library đã Add ({libraryHidden})</span>
+          </label>
+          {filtersActive ? (
+            <button
+              type="button"
+              className="btn ghost el-voice-clear-filters"
+              disabled={disabled}
+              onClick={clearFilters}
+            >
+              Xóa bộ lọc
+            </button>
+          ) : null}
+        </div>
         <input
           type="search"
           value={query}
@@ -262,20 +296,28 @@ export default function ElevenLabsVoicePicker({
         />
       </div>
 
+      {langFilter !== 'all' ? (
+        <p className="hint el-voice-filter-hint">
+          Đang lọc Language ={' '}
+          {LANGUAGE_OPTIONS.find((o) => o.id === langFilter)?.label || langFilter} — nhiều giọng
+          premade bị ẩn. Bấm «Xóa bộ lọc» hoặc chọn All languages để đổi giọng.
+        </p>
+      ) : null}
+
       <div className="el-voice-list" role="listbox" aria-label="Danh sách giọng">
-        {filtered.length === 0 ? (
+        {listVoices.length === 0 ? (
           <p className="muted pad">
-            Không có giọng khớp bộ lọc. Bật «Hiện Voice Library» hoặc xóa ô tìm kiếm.
+            Không có giọng khớp bộ lọc. Bấm «Xóa bộ lọc» hoặc All languages / xóa ô tìm kiếm.
           </p>
         ) : (
-          filtered.map((voice) => {
+          listVoices.map((voice) => {
             const active = voice.voiceId === value;
             const playing = playingId === voice.voiceId;
             const isLib = (voice.category || '').toLowerCase() === 'library';
             return (
               <div
                 key={voice.voiceId}
-                className={`el-voice-row ${active ? 'active' : ''}`}
+                className={`el-voice-row ${active ? 'active' : ''} ${isLib ? 'is-library' : ''}`}
                 role="option"
                 aria-selected={active}
               >
@@ -307,12 +349,15 @@ export default function ElevenLabsVoicePicker({
       </div>
       {selectedIsLibrary ? (
         <p className="hint voice-library-warn">
-          Giọng Library: khi hết token, app tự Add cùng giọng sang API key mới rồi TTS tiếp (có thể
-          khác voice_id trên account đó). Gói Free vẫn có thể bị ElevenLabs 402.
+          Giọng Library (như Kenzo): gói Free API không TTS được. Muốn Generate ổn định hãy chọn
+          giọng premade (bỏ lọc Japanese nếu đang bật) hoặc OpenAI TTS.
         </p>
       ) : null}
       <p className="hint">
-        {filtered.length} giọng
+        {filtered.length}/{voices.length} giọng
+        {libraryHidden === 0
+          ? ' · Chưa có Voice Library trên account của API key đang dùng — Add trên web phải cùng account với key Priority 1, rồi bấm Tải lại giọng.'
+          : ''}
         {previewError ? ` · ${previewError}` : ''}
         {!selected?.previewUrl && selected
           ? ' · Giọng này không có sample sẵn — nghe thử sẽ gọi TTS ngắn.'

@@ -17,6 +17,7 @@ export const IPC = {
   elevenLabsSessionChanged: 'elevenlabs:sessionChanged',
   elevenLabsListVoices: 'elevenlabs:listVoices',
   elevenLabsPreviewVoice: 'elevenlabs:previewVoice',
+  elevenLabsAddLibraryVoice: 'elevenlabs:addLibraryVoice',
   elevenLabsListApiKeys: 'elevenlabs:listApiKeys',
   elevenLabsAddApiKey: 'elevenlabs:addApiKey',
   elevenLabsUpdateApiKey: 'elevenlabs:updateApiKey',

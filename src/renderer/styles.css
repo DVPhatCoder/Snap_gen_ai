@@ -1037,6 +1037,7 @@ h2 {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin: 0;
   font-size: 12px;
   color: var(--muted);
   cursor: pointer;
@@ -1046,6 +1047,62 @@ h2 {
 .el-voice-library-toggle input {
   width: auto;
   margin: 0;
+}
+
+.el-voice-filter-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.el-voice-clear-filters {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.el-voice-filter-hint {
+  margin: 0 0 8px;
+  padding: 0 2px;
+  color: var(--warning, #f6ba57);
+}
+
+.el-add-voice-by-id {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin: 8px 0 10px;
+}
+
+.el-add-voice-by-id input {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: none;
+  color: var(--text);
+  background: #0e1014;
+}
+
+.el-add-voice-by-id input:focus {
+  border-color: rgba(37, 224, 208, 0.72);
+  box-shadow: 0 0 0 2px rgba(37, 224, 208, 0.1);
+}
+
+.el-add-voice-by-id input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+.project-voice-panel .hint.ok {
+  color: #8fd19e;
+}
+
+.project-voice-panel .hint.error {
+  color: #f0a0a0;
 }
 
 .el-voice-tools input[type='search'] {
@@ -3128,14 +3185,4 @@ h2 {
   .el-keys-add {
     grid-template-columns: 1fr;
   }
-}
-
-.el-voice-library-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 8px 0;
-  font-size: 12px;
-  color: var(--muted, #9aa0ad);
-  cursor: pointer;
 }

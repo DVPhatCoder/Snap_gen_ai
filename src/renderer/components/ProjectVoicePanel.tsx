@@ -18,6 +18,11 @@ export default function ProjectVoicePanel({
 }) {
   const [voices, setVoices] = useState<ElevenLabsVoice[]>([]);
   const [voicesBusy, setVoicesBusy] = useState(false);
+  const [addVoiceInput, setAddVoiceInput] = useState('');
+  const [addVoiceBusy, setAddVoiceBusy] = useState(false);
+  const [addVoiceMsg, setAddVoiceMsg] = useState<{ type: 'ok' | 'error'; text: string } | null>(
+    null
+  );
   const [elevenLabs, setElevenLabs] = useState<ElevenLabsSessionStatus>({
     loggedIn: false,
     cookieCount: 0,
@@ -25,6 +30,32 @@ export default function ProjectVoicePanel({
   });
 
   const elevenLabsReady = elevenLabs.loggedIn || elevenLabs.hasApiCredential;
+
+  const addLibraryById = async () => {
+    const raw = addVoiceInput.trim();
+    if (!raw) return;
+    setAddVoiceBusy(true);
+    setAddVoiceMsg(null);
+    try {
+      const result = await window.studio.addElevenLabsLibraryVoice({ voiceIdOrUrl: raw });
+      setVoices(result.voices);
+      patch({
+        elevenLabsVoiceId: result.voiceId,
+        elevenLabsPublicOwnerId: result.publicOwnerId,
+        elevenLabsOriginalVoiceId: result.libraryVoiceId,
+        elevenLabsVoiceName: result.name,
+      });
+      setAddVoiceInput('');
+      setAddVoiceMsg({ type: 'ok', text: result.message });
+    } catch (err) {
+      setAddVoiceMsg({
+        type: 'error',
+        text: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setAddVoiceBusy(false);
+    }
+  };
 
   useEffect(() => {
     void window.studio.getElevenLabsSession().then(setElevenLabs);
@@ -107,6 +138,41 @@ export default function ProjectVoicePanel({
                 {voicesBusy ? 'Đang tải…' : 'Tải lại giọng'}
               </button>
             </div>
+            <p className="hint" style={{ marginTop: 0 }}>
+              Dán Voice ID/URL → Add theo ID. Giọng Library trên Free API thường bị chặn — app sẽ thử
+              TTS bằng session web (cần Settings → Đăng nhập ElevenLabs). Premade vẫn ổn định nhất.
+            </p>
+            <div className="el-add-voice-by-id">
+              <input
+                type="text"
+                value={addVoiceInput}
+                disabled={disabled || !elevenLabsReady || addVoiceBusy}
+                placeholder="Voice ID hoặc URL… (vd. j210dv0vWm7fCknyQpbA)"
+                onChange={(e) => setAddVoiceInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void addLibraryById();
+                  }
+                }}
+                aria-label="Voice ID hoặc URL ElevenLabs Library"
+              />
+              <button
+                type="button"
+                className="btn primary"
+                disabled={
+                  disabled || !elevenLabsReady || addVoiceBusy || !addVoiceInput.trim()
+                }
+                onClick={() => void addLibraryById()}
+              >
+                {addVoiceBusy ? 'Đang Add…' : 'Add theo ID'}
+              </button>
+            </div>
+            {addVoiceMsg ? (
+              <p className={`hint ${addVoiceMsg.type === 'ok' ? 'ok' : 'error'}`}>
+                {addVoiceMsg.text}
+              </p>
+            ) : null}
             <ElevenLabsVoicePicker
               voices={voices}
               value={value.elevenLabsVoiceId}

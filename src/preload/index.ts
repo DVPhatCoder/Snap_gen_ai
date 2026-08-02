@@ -90,6 +90,18 @@ const api = {
     modelId?: string;
     language?: string;
   }): Promise<{ dataUrl: string }> => ipcRenderer.invoke(IPC.elevenLabsPreviewVoice, input),
+  addElevenLabsLibraryVoice: (input: {
+    voiceIdOrUrl: string;
+    newName?: string;
+  }): Promise<{
+    voiceId: string;
+    libraryVoiceId: string;
+    publicOwnerId: string;
+    name: string;
+    syncedKeys: number;
+    message: string;
+    voices: ElevenLabsVoice[];
+  }> => ipcRenderer.invoke(IPC.elevenLabsAddLibraryVoice, input),
   onElevenLabsSessionChange: (cb: (status: ElevenLabsSessionStatus) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, status: ElevenLabsSessionStatus) => cb(status);
     ipcRenderer.on(IPC.elevenLabsSessionChanged, listener);
