@@ -14,9 +14,15 @@ const STATUS_LABEL: Record<ProviderApiKeyStatus, string> = {
 interface Props {
   disabled?: boolean;
   onChanged?: () => void;
+  /** api_key = dán key ngoài, không cần tài khoản. */
+  mode?: 'api_key' | 'account';
 }
 
-export default function ElevenLabsApiKeysPanel({ disabled, onChanged }: Props) {
+export default function ElevenLabsApiKeysPanel({
+  disabled,
+  onChanged,
+  mode = 'api_key',
+}: Props) {
   const [keys, setKeys] = useState<ProviderApiKeyPublic[]>([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
@@ -65,11 +71,11 @@ export default function ElevenLabsApiKeysPanel({ disabled, onChanged }: Props) {
     <div className="el-keys-panel">
       <div className="el-keys-head">
         <div>
-          <h3>ElevenLabs API Keys</h3>
+          <h3>{mode === 'api_key' ? 'Dán API key bên ngoài' : 'ElevenLabs API Keys'}</h3>
           <p className="hint">
-            Thêm nhiều key — hết quota sẽ tự chuyển sang key Priority tiếp theo. Key cùng một
-            account ElevenLabs thì chung credit (đổi key không giúp); cần key từ account khác còn
-            credit.
+            {mode === 'api_key'
+              ? 'Dán key từ bất kỳ nguồn nào → Add → dùng ngay. Nhiều key = tự failover theo Priority. Không cần đăng nhập.'
+              : 'Thêm nhiều key — hết quota sẽ tự chuyển theo Priority. Key cùng một account thì chung credit.'}
           </p>
         </div>
         <button type="button" className="btn" disabled={busy || disabled} onClick={() => void refresh()}>
@@ -80,14 +86,14 @@ export default function ElevenLabsApiKeysPanel({ disabled, onChanged }: Props) {
       <div className="el-keys-add">
         <input
           type="text"
-          placeholder="Tên (tuỳ chọn)"
+          placeholder="Tên (vd. key ngoài 1)"
           value={draftName}
           disabled={busy || disabled}
           onChange={(e) => setDraftName(e.target.value)}
         />
         <input
           type="password"
-          placeholder="sk_… hoặc xi_…"
+          placeholder="Dán sk_… hoặc xi_… từ ngoài"
           value={draftKey}
           disabled={busy || disabled}
           onChange={(e) => setDraftKey(e.target.value)}
@@ -105,7 +111,13 @@ export default function ElevenLabsApiKeysPanel({ disabled, onChanged }: Props) {
               });
               setDraftKey('');
               setDraftName('');
-              setMsg({ type: 'ok', text: 'Đã thêm API key.' });
+              setMsg({
+                type: 'ok',
+                text:
+                  mode === 'api_key'
+                    ? 'Đã thêm API key ngoài — có thể dùng ElevenLabs ngay.'
+                    : 'Đã thêm API key.',
+              });
               return list;
             })
           }

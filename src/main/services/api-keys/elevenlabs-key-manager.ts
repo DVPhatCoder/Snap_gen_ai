@@ -103,6 +103,12 @@ export class ElevenLabsKeyManager {
     }
 
     if (status === 401) {
+      // Thiếu scope (user_read…) ≠ key sai — không đánh invalid vội.
+      if (/missing.?permission|missing_per|unauthorized/i.test(body) &&
+          !/invalid.?api.?key|api key.*invalid/i.test(body)) {
+        this.markReady(id);
+        return 'failover';
+      }
       this.markInvalid(id);
       return 'failover';
     }
@@ -150,32 +156,72 @@ export class ElevenLabsKeyManager {
     const records = loadElevenLabsKeyRecords();
     const target = records.find((r) => r.id === id);
     if (!target) return { ok: false, message: 'Không tìm thấy API key.' };
+
+    const headers = {
+      Accept: 'application/json',
+      'xi-api-key': target.apiKey,
+    };
+
     try {
-      const res = await fetch('https://api.elevenlabs.io/v1/user', {
-        headers: {
-          Accept: 'application/json',
-          'xi-api-key': target.apiKey,
-        },
-      });
-      const text = await res.text();
-      if (!res.ok) {
-        this.applyHttpFailure(id, res.status, text);
-        if (isElevenLabsFreeTierDisabled(text)) {
+      // 1) /v1/user — optional (cần user_read). Thiếu quyền không = key hỏng.
+      let email = '';
+      const userRes = await fetch('https://api.elevenlabs.io/v1/user', { headers });
+      const userText = await userRes.text();
+      if (userRes.ok) {
+        try {
+          email = String((JSON.parse(userText) as { email?: string }).email || '');
+        } catch {
+          /* ignore */
+        }
+      } else if (isElevenLabsFreeTierDisabled(userText)) {
+        this.applyHttpFailure(id, userRes.status, userText);
+        return {
+          ok: false,
+          message:
+            'ElevenLabs đã khóa Free Tier trên account này (VPN / nhiều account free). ' +
+            'Reset Status không mở khóa được. Dùng account/key khác hoặc OpenAI TTS.',
+        };
+      } else if (
+        userRes.status === 401 &&
+        !/missing.?permission|user_read|missing_per/i.test(userText)
+      ) {
+        // Key sai thật sự
+        this.markInvalid(id);
+        return {
+          ok: false,
+          message: `API key không hợp lệ (HTTP 401). Tạo key mới tại ElevenLabs → API Keys.`,
+        };
+      }
+      // missing user_read → bỏ qua, tiếp tục test voices/TTS
+
+      // 2) /v1/voices — cần voices_read
+      const voicesRes = await fetch('https://api.elevenlabs.io/v1/voices', { headers });
+      const voicesText = await voicesRes.text();
+      if (!voicesRes.ok) {
+        if (isElevenLabsFreeTierDisabled(voicesText)) {
+          this.applyHttpFailure(id, voicesRes.status, voicesText);
           return {
             ok: false,
             message:
-              'ElevenLabs đã khóa Free Tier trên account này (VPN / nhiều account free). ' +
-              'Reset Status trong app không mở khóa được. Cần: account/key khác chưa bị khóa, ' +
-              'gói trả phí, hoặc OpenAI TTS trong dự án.',
+              'Free Tier TTS/voices đã bị ElevenLabs khóa trên account này. Đổi key/account hoặc OpenAI TTS.',
           };
         }
+        if (/missing.?permission|voices_read|missing_per/i.test(voicesText)) {
+          return {
+            ok: false,
+            message:
+              'API key thiếu quyền Voices Read. Vào elevenlabs.io → API Keys → Create Key, ' +
+              'bật đủ quyền (hoặc unrestricted): Voices, Text to Speech, User — rồi dán key mới vào app.',
+          };
+        }
+        this.applyHttpFailure(id, voicesRes.status, voicesText);
         return {
           ok: false,
-          message: `HTTP ${res.status}: ${text.slice(0, 180)}`,
+          message: `HTTP ${voicesRes.status}: ${voicesText.slice(0, 180)}`,
         };
       }
 
-      // Key hợp lệ với /user — thử TTS ngắn để phát hiện khóa Free / Library.
+      // 3) TTS premade ngắn — cần text_to_speech
       const probe = await fetch(
         'https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM',
         {
@@ -193,31 +239,34 @@ export class ElevenLabsKeyManager {
       );
       if (!probe.ok) {
         const probeText = await probe.text();
-        this.applyHttpFailure(id, probe.status, probeText);
         if (isElevenLabsFreeTierDisabled(probeText)) {
+          this.applyHttpFailure(id, probe.status, probeText);
           return {
             ok: false,
             message:
-              'Key đăng nhập được nhưng Free Tier TTS đã bị ElevenLabs khóa. ' +
-              'Reset không giúp. Đổi OpenAI TTS hoặc dùng API key/account khác (trả phí hoặc free chưa bị khóa).',
+              'Key đọc voices được nhưng Free Tier TTS bị khóa. Đổi OpenAI TTS hoặc API key/account khác.',
           };
         }
+        if (/missing.?permission|text_to_speech|missing_per/i.test(probeText)) {
+          return {
+            ok: false,
+            message:
+              'API key thiếu quyền Text to Speech. Tạo key mới với quyền Text to Speech (hoặc unrestricted).',
+          };
+        }
+        this.applyHttpFailure(id, probe.status, probeText);
         return {
           ok: false,
-          message: `User OK nhưng TTS fail HTTP ${probe.status}: ${probeText.slice(0, 160)}`,
+          message: `Voices OK nhưng TTS fail HTTP ${probe.status}: ${probeText.slice(0, 160)}`,
         };
       }
 
       this.markSuccess(id);
-      let email = '';
-      try {
-        email = String((JSON.parse(text) as { email?: string }).email || '');
-      } catch {
-        /* ignore */
-      }
       return {
         ok: true,
-        message: email ? `OK · ${email} · TTS premade được` : 'API key hợp lệ · TTS premade được.',
+        message: email
+          ? `OK · ${email} · TTS premade được`
+          : 'API key OK · Voices + TTS premade được (thiếu user_read cũng không sao).',
       };
     } catch (err) {
       return {

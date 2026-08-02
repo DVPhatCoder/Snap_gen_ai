@@ -3041,6 +3041,33 @@ h2 {
   font-size: 11px;
 }
 
+.el-mode-switch {
+  display: inline-flex;
+  gap: 4px;
+  margin: 0 0 12px;
+  padding: 4px;
+  border: 1px solid var(--line, #2a2e38);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.el-mode-btn {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.el-mode-btn.active {
+  background: var(--accent, #3d8bfd);
+  color: #fff;
+}
+
 .el-keys-panel {
   margin-top: 16px;
   padding-top: 14px;

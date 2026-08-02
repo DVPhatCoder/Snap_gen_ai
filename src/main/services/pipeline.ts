@@ -31,7 +31,7 @@ import {
   type SceneTiming,
 } from './openai-audio';
 import { synthesizeWithElevenLabs, resolveElevenLabsLanguageCode, resolveElevenLabsModelForLanguage } from './elevenlabs-tts';
-import { getElevenLabsSessionStatus } from './elevenlabs-auth';
+import { getElevenLabsSessionStatus, hasElevenLabsApiAccess } from './elevenlabs-auth';
 import {
   assembleFinalVideo,
   assembleSlideshowFromImages,
@@ -558,9 +558,13 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
     throw new Error('Thiếu OpenAI API key. Vào Settings để cấu hình.');
   }
   if (voice.ttsProvider === 'elevenlabs') {
-    const el = await getElevenLabsSessionStatus();
-    if (!el.loggedIn && !el.hasApiCredential) {
-      throw new Error('Chưa có API key ElevenLabs. Vào Settings → dán API key free rồi Lưu.');
+    if (!hasElevenLabsApiAccess()) {
+      const el = await getElevenLabsSessionStatus();
+      if (!el.hasApiCredential) {
+        throw new Error(
+          'Chưa có API key ElevenLabs. Vào Settings → Add API Key (sk_…/xi_…). Không cần đăng nhập web.'
+        );
+      }
     }
   }
 

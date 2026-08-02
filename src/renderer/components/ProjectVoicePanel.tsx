@@ -139,8 +139,8 @@ export default function ProjectVoicePanel({
               </button>
             </div>
             <p className="hint" style={{ marginTop: 0 }}>
-              Dán Voice ID/URL → Add theo ID. Giọng Library trên Free API thường bị chặn — app sẽ thử
-              TTS bằng session web (cần Settings → Đăng nhập ElevenLabs). Premade vẫn ổn định nhất.
+              Settings → ElevenLabs → «API key bên ngoài» → dán key là dùng (không cần tài khoản).
+              Dán Voice ID/URL → Add theo ID. Library Free API có thể bị chặn — ưu tiên premade.
             </p>
             <div className="el-add-voice-by-id">
               <input

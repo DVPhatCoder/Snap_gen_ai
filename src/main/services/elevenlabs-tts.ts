@@ -3,14 +3,14 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ElevenLabsVoice } from '../../shared/types';
 import type { TranscriptWord } from './openai-audio';
-import { elevenLabsFetch, getElevenLabsCookieHeader, getElevenLabsSessionStatus } from './elevenlabs-auth';
+import { elevenLabsFetch, getElevenLabsCookieHeader, getElevenLabsSessionStatus, hasElevenLabsApiAccess } from './elevenlabs-auth';
 import { getCapturedElevenLabsAuthorization } from '../store';
 import {
   ElevenLabsKeyManager,
   formatElevenLabsKeysUnavailableError,
   isElevenLabsLibraryFreeBlocked,
 } from './api-keys/elevenlabs-key-manager';
-import { loadElevenLabsKeyRecords } from './api-keys/elevenlabs-keys-store';
+import { loadElevenLabsKeyRecords, hasAnyElevenLabsApiKey } from './api-keys/elevenlabs-keys-store';
 import {
   addLibraryVoiceByIdOrUrl,
   elevenLabsFetchWithKey,
@@ -127,10 +127,13 @@ function wordsToSrt(words: TranscriptWord[], maxChars = 42): string {
 }
 
 async function ensureLoggedIn(): Promise<void> {
+  // Chỉ cần API key — không bắt đăng nhập web.
+  if (hasElevenLabsApiAccess() || hasAnyElevenLabsApiKey()) return;
   const status = await getElevenLabsSessionStatus();
-  if (!status.loggedIn && !status.hasApiCredential) {
-    throw new Error('Chưa có API key ElevenLabs. Vào Settings → dán API key free rồi Lưu.');
-  }
+  if (status.hasApiCredential) return;
+  throw new Error(
+    'Chưa có API key ElevenLabs. Vào Settings → ElevenLabs → Add API Key (sk_… hoặc xi_…). Không cần Đăng nhập web.'
+  );
 }
 
 /**

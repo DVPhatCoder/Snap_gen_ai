@@ -39,8 +39,17 @@ export default function Settings() {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  /** api_key = chỉ dán key ngoài (không cần tài khoản). account = đăng nhập web tuỳ chọn. */
+  const [elevenLabsMode, setElevenLabsMode] = useState<'api_key' | 'account'>(() => {
+    try {
+      const saved = localStorage.getItem('snapgen.elevenLabsMode');
+      return saved === 'account' ? 'account' : 'api_key';
+    } catch {
+      return 'api_key';
+    }
+  });
 
-  const elevenLabsReady = elevenLabs.loggedIn || !!elevenLabs.hasApiCredential;
+  const elevenLabsReady = !!elevenLabs.hasApiCredential || elevenLabs.loggedIn;
 
   const refreshUsage = async () => {
     setUsageBusy(true);
@@ -268,79 +277,159 @@ export default function Settings() {
 
       <section className="settings-block" id="elevenlabs">
         <h2>ElevenLabs</h2>
-        <p className="settings-note">
-          API TTS của ElevenLabs bắt buộc có API key (tier free cũng được). Cách nhanh nhất: mở trang
-          API Keys → Create Key → copy → dán vào ô bên dưới → Lưu API key.
-        </p>
-        <div className={`session-card ${elevenLabsReady ? 'ok' : ''}`}>
-          <div className="session-card-main">
-            <span className={`session-dot ${elevenLabsReady ? 'on' : ''}`} />
-            <div>
-              <strong>
-                {elevenLabs.hasApiCredential
-                  ? 'Đã có API key TTS'
-                  : elevenLabs.loggedIn
-                    ? 'Đã đăng nhập (chưa có API key)'
-                    : 'Chưa cấu hình'}
-              </strong>
-              <p>
-                {elevenLabsReady
-                  ? [
-                      elevenLabs.email || elevenLabs.displayName || 'Credential đã lưu',
-                      elevenLabs.cookieCount ? `${elevenLabs.cookieCount} cookies` : null,
-                      elevenLabs.hasApiCredential ? 'credential TTS OK' : 'thiếu API key',
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')
-                  : 'Chưa có API key ElevenLabs trên máy này.'}
-              </p>
-            </div>
-          </div>
-          <div className="session-card-actions">
-            <button
-              type="button"
-              className="btn primary"
-              disabled={busy}
-              onClick={() => void openApiKeysPage()}
-            >
-              Mở trang API Keys
-            </button>
-            <button
-              type="button"
-              className="btn"
-              disabled={busy}
-              onClick={() => void loginElevenLabs()}
-            >
-              Đăng nhập web
-            </button>
-            <button
-              type="button"
-              className="btn"
-              disabled={busy}
-              onClick={() => void test('elevenlabs')}
-            >
-              Kiểm tra
-            </button>
-            <button
-              type="button"
-              className="btn"
-              disabled={busy || !elevenLabsReady}
-              onClick={() => void loadVoices(true)}
-            >
-              Tải danh sách giọng
-            </button>
-            <button
-              type="button"
-              className="btn"
-              disabled={busy || !elevenLabsReady}
-              onClick={() => void logoutElevenLabs()}
-            >
-              Xóa session / key
-            </button>
-          </div>
+        <div className="el-mode-switch" role="tablist" aria-label="Cách kết nối ElevenLabs">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={elevenLabsMode === 'api_key'}
+            className={`el-mode-btn ${elevenLabsMode === 'api_key' ? 'active' : ''}`}
+            onClick={() => {
+              setElevenLabsMode('api_key');
+              try {
+                localStorage.setItem('snapgen.elevenLabsMode', 'api_key');
+              } catch {
+                /* ignore */
+              }
+            }}
+          >
+            API key bên ngoài
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={elevenLabsMode === 'account'}
+            className={`el-mode-btn ${elevenLabsMode === 'account' ? 'active' : ''}`}
+            onClick={() => {
+              setElevenLabsMode('account');
+              try {
+                localStorage.setItem('snapgen.elevenLabsMode', 'account');
+              } catch {
+                /* ignore */
+              }
+            }}
+          >
+            Tài khoản web
+          </button>
         </div>
 
+        {elevenLabsMode === 'api_key' ? (
+          <>
+            <p className="settings-note">
+              <strong>Không cần tài khoản trong app.</strong> Có sẵn API key từ nguồn ngoài (account
+              khác, mua, share…) → dán <code>sk_…</code> / <code>xi_…</code> vào ô bên dưới là dùng
+              TTS ngay. Không đăng nhập ElevenLabs.
+            </p>
+            <div className={`session-card ${elevenLabs.hasApiCredential ? 'ok' : ''}`}>
+              <div className="session-card-main">
+                <span className={`session-dot ${elevenLabs.hasApiCredential ? 'on' : ''}`} />
+                <div>
+                  <strong>
+                    {elevenLabs.hasApiCredential
+                      ? 'Sẵn sàng — đang dùng API key'
+                      : 'Chưa có API key'}
+                  </strong>
+                  <p>
+                    {elevenLabs.hasApiCredential
+                      ? 'Add key → Test → chọn giọng trong dự án. Hết quota thì thêm key khác.'
+                      : 'Dán API key bên dưới rồi bấm + Add API Key.'}
+                  </p>
+                </div>
+              </div>
+              <div className="session-card-actions">
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy}
+                  onClick={() => void test('elevenlabs')}
+                >
+                  Kiểm tra
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy || !elevenLabs.hasApiCredential}
+                  onClick={() => void loadVoices(true)}
+                >
+                  Tải danh sách giọng
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="settings-note">
+              Đăng nhập web ElevenLabs (tuỳ chọn) — dùng khi muốn bắt key từ trình duyệt trong app
+              hoặc dùng session web. Vẫn có thể Add API key thủ công bên dưới.
+            </p>
+            <div className={`session-card ${elevenLabsReady ? 'ok' : ''}`}>
+              <div className="session-card-main">
+                <span className={`session-dot ${elevenLabsReady ? 'on' : ''}`} />
+                <div>
+                  <strong>
+                    {elevenLabs.hasApiCredential
+                      ? 'Sẵn sàng (đã có API key)'
+                      : elevenLabs.loggedIn
+                        ? 'Đã đăng nhập web (chưa có API key)'
+                        : 'Chưa cấu hình'}
+                  </strong>
+                  <p>
+                    {elevenLabs.hasApiCredential
+                      ? [
+                          elevenLabs.email || elevenLabs.displayName || 'Có API key',
+                          elevenLabs.loggedIn ? 'đã login web' : 'không cần login web',
+                        ].join(' · ')
+                      : 'Đăng nhập web hoặc Add API key bên dưới.'}
+                  </p>
+                </div>
+              </div>
+              <div className="session-card-actions">
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy}
+                  onClick={() => void openApiKeysPage()}
+                >
+                  Mở trang API Keys
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy}
+                  onClick={() => void loginElevenLabs()}
+                >
+                  Đăng nhập web
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy}
+                  onClick={() => void test('elevenlabs')}
+                >
+                  Kiểm tra
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy || !elevenLabsReady}
+                  onClick={() => void loadVoices(true)}
+                >
+                  Tải danh sách giọng
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy || !elevenLabsReady}
+                  onClick={() => void logoutElevenLabs()}
+                >
+                  Xóa session / key
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
         <ElevenLabsApiKeysPanel
+          mode={elevenLabsMode}
           disabled={busy}
           onChanged={() => {
             void window.studio.getElevenLabsSession().then(setElevenLabs);

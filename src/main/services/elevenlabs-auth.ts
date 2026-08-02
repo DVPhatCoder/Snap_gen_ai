@@ -387,8 +387,14 @@ function toStatus(meta: ElevenLabsMeta): ElevenLabsSessionStatus {
     displayName: meta.displayName,
     updatedAt: meta.updatedAt,
     cookieCount: meta.cookieCount ?? 0,
-    hasApiCredential: hasCapturedElevenLabsCredential(),
+    // Chỉ cần API key trong danh sách — không bắt buộc đăng nhập web.
+    hasApiCredential: hasElevenLabsApiAccess(),
   };
+}
+
+/** Có API key (multi-key store hoặc legacy) là dùng TTS được. */
+export function hasElevenLabsApiAccess(): boolean {
+  return hasAnyElevenLabsApiKey() || hasCapturedElevenLabsCredential();
 }
 
 function emitStatus(status: ElevenLabsSessionStatus): void {
@@ -433,7 +439,7 @@ export async function syncElevenLabsSession(options?: {
   const authCookies = cookies.filter(isAuthCookie);
   const cookieHeader = cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ');
   const apiKey = getCapturedElevenLabsApiKey();
-  const hasCred = hasCapturedElevenLabsCredential();
+  const hasCred = hasElevenLabsApiAccess();
   const previous = getElevenLabsMeta();
 
   let email = options?.pageHints?.email || previous.email;
@@ -455,6 +461,7 @@ export async function syncElevenLabsSession(options?: {
     }
   }
 
+  // Có API key là đủ dùng app — không xóa trạng thái chỉ vì chưa login web.
   if (!cookieHeader && authCookies.length === 0 && !options?.pageHints?.hasLocalAuth && !hasCred) {
     loggedIn = false;
     email = undefined;
