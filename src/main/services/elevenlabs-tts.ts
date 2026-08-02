@@ -377,14 +377,11 @@ export async function synthesizeWithElevenLabs(options: {
 
       const kind = ElevenLabsKeyManager.applyHttpFailure(record.id, res.status, detail);
       if (kind === 'fatal') {
-        if (res.status === 401) {
-          throw new Error(
-            'ElevenLabs API key không hợp lệ (HTTP 401). Vào Settings → lưu lại API key mới.'
-          );
-        }
         throw new Error(`ElevenLabs TTS failed: HTTP ${res.status} ${detail}`);
       }
+      // Hết quota / lỗi key → chuyển sang key Priority tiếp theo.
       tried.add(record.id);
+      continue;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       lastDetail = msg;

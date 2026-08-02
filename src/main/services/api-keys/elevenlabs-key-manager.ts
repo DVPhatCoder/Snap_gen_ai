@@ -83,12 +83,26 @@ export class ElevenLabsKeyManager {
       return 'failover';
     }
 
-    if (status === 401) {
+    // Free Tier bị ElevenLabs khóa (VPN / multi-account) — đánh invalid, thử key khác.
+    if (isElevenLabsFreeTierDisabled(body)) {
       this.markInvalid(id);
       return 'failover';
     }
-    // Free Tier bị ElevenLabs khóa (VPN / multi-account) — đánh invalid, thử key khác.
-    if (isElevenLabsFreeTierDisabled(body)) {
+
+    // Hết quota/credit — kể cả khi HTTP 401 (ElevenLabs đôi khi trả vậy).
+    if (
+      status === 402 ||
+      /quota_exceeded|exceeds your quota|credits remaining|insufficient.{0,20}credit|character limit|payment.?required/i.test(
+        body
+      ) ||
+      ((status === 400 || status === 401 || status === 403) &&
+        /quota|credit|exhausted|monthly|upgrade/i.test(body))
+    ) {
+      this.markExhausted(id);
+      return 'failover';
+    }
+
+    if (status === 401) {
       this.markInvalid(id);
       return 'failover';
     }
@@ -96,11 +110,7 @@ export class ElevenLabsKeyManager {
       this.markRateLimited(id);
       return 'failover';
     }
-    if (
-      status === 402 ||
-      status === 403 ||
-      /quota|credit|exhausted|character limit|monthly|payment|upgrade/i.test(body)
-    ) {
+    if (status === 403 || /payment|upgrade/i.test(body)) {
       this.markExhausted(id);
       return 'failover';
     }
@@ -235,8 +245,34 @@ export function formatElevenLabsKeysUnavailableError(detail: string, voiceHint?:
       `Thêm key free mới cùng kiểu thường vẫn bị chặn.`
     );
   }
+
+  const statuses = summarizeElevenLabsKeyStatuses();
+  const isQuota =
+    /quota_exceeded|exceeds your quota|credits remaining|insufficient.{0,20}credit/i.test(
+      detail || ''
+    );
+
+  if (isQuota) {
+    return (
+      `ElevenLabs hết credit/quota trên các key còn dùng được.${voicePart} ` +
+      `App đã thử chuyển key theo Priority — nếu mọi key cùng một account thì chúng CHUNG credit, đổi key không giúp. ` +
+      `Cần: key từ account ElevenLabs khác còn credit, hoặc nạp/nâng gói, hoặc OpenAI TTS / Giữ voiceover. ` +
+      `Trạng thái key: ${statuses}. ` +
+      (detail ? `Chi tiết: ${detail.slice(0, 180)}` : '')
+    );
+  }
+
   return (
-    `${ALL_KEYS_UNAVAILABLE_MESSAGE}${voicePart}` +
+    `${ALL_KEYS_UNAVAILABLE_MESSAGE}${voicePart} ` +
+    `Trạng thái key: ${statuses}.` +
     (detail ? ` Chi tiết: ${detail.slice(0, 220)}` : '')
   );
+}
+
+export function summarizeElevenLabsKeyStatuses(): string {
+  const list = listElevenLabsKeysPublic();
+  if (!list.length) return 'chưa có key';
+  return list
+    .map((k) => `${k.name || 'Key'}(P${k.priority}:${k.status}${k.enabled ? '' : ',off'})`)
+    .join(', ');
 }

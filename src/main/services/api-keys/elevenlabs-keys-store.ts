@@ -225,7 +225,10 @@ export function moveElevenLabsKey(id: string, direction: 'up' | 'down'): void {
   const tmp = records[index];
   records[index] = records[swapWith];
   records[swapWith] = tmp;
-  saveElevenLabsKeyRecords(records);
+  // Bắt buộc gán lại priority theo thứ tự mảng sau swap.
+  // Nếu giữ priority cũ, save → reindexPriorities sẽ sort về đúng thứ tự ban đầu.
+  const reordered = records.map((r, i) => ({ ...r, priority: i + 1 }));
+  saveElevenLabsKeyRecords(reordered);
 }
 
 export function resetElevenLabsKeyStatus(id: string): ProviderApiKeyRecord {

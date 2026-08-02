@@ -67,7 +67,9 @@ export default function ElevenLabsApiKeysPanel({ disabled, onChanged }: Props) {
         <div>
           <h3>ElevenLabs API Keys</h3>
           <p className="hint">
-            Thêm nhiều key — hết quota/token sẽ tự chuyển sang key tiếp theo (failover).
+            Thêm nhiều key — hết quota sẽ tự chuyển sang key Priority tiếp theo. Key cùng một
+            account ElevenLabs thì chung credit (đổi key không giúp); cần key từ account khác còn
+            credit.
           </p>
         </div>
         <button type="button" className="btn" disabled={busy || disabled} onClick={() => void refresh()}>
