@@ -2187,6 +2187,29 @@ h2 {
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
 }
 
+.job-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+
+.btn.danger {
+  border-color: #7a3030;
+  color: #ffb4b4;
+  background: #2a1515;
+}
+
+.btn.danger:hover:not(:disabled) {
+  border-color: #a04444;
+  background: #3a1c1c;
+}
+
+.status-dot.paused {
+  background: #e6b84d;
+  box-shadow: 0 0 0 3px rgba(230, 184, 77, 0.18);
+}
+
 .progress-head {
   display: flex;
   align-items: flex-start;

@@ -7,6 +7,7 @@ const PHASE_LABEL: Record<string, string> = {
   video: 'Render video',
   image: 'Render ảnh',
   merge: 'Ghép final',
+  paused: 'Tạm dừng',
   done: 'Xong',
   error: 'Lỗi',
 };
@@ -33,13 +34,23 @@ const SCENE_STATE_ICON: Record<SceneJobState, string> = {
   skipped: '–',
 };
 
-export default function JobProgressView({ progress }: { progress: JobProgress | null }) {
+export default function JobProgressView({
+  progress,
+  showControls,
+}: {
+  progress: JobProgress | null;
+  /** Hiện nút Tạm dừng / Tiếp tục / Dừng khi job đang chạy. */
+  showControls?: boolean;
+}) {
   const percent = Math.min(100, Math.max(0, progress?.percent ?? 0));
   const isError = progress?.phase === 'error';
+  const control = progress?.control || 'running';
+  const isPaused = control === 'paused' || progress?.phase === 'paused';
+  const isStopping = control === 'stop';
   const phaseLabel = progress?.phase ? PHASE_LABEL[progress.phase] || progress.phase : '';
   const detail =
     progress?.detailPercent != null &&
-    (progress.phase === 'video' || progress.phase === 'image')
+    (progress.phase === 'video' || progress.phase === 'image' || progress.phase === 'paused')
       ? Math.min(100, Math.max(0, progress.detailPercent))
       : null;
   const statuses = progress?.sceneStatuses;
@@ -47,12 +58,26 @@ export default function JobProgressView({ progress }: { progress: JobProgress | 
     progress?.scenesCompleted ??
     statuses?.filter((s) => s.state === 'completed' || s.state === 'cached').length;
   const total = progress?.sceneTotal ?? statuses?.length;
+  const canControl =
+    Boolean(showControls) &&
+    Boolean(progress) &&
+    progress!.phase !== 'done' &&
+    progress!.phase !== 'error' &&
+    progress!.phase !== 'idle';
 
   return (
     <div className="progress-wrap">
       <div className="progress-head">
         <div>
-          <span className={`status-dot ${progress && progress.phase !== 'idle' ? 'on' : ''}`} />
+          <span
+            className={`status-dot ${
+              progress && progress.phase !== 'idle'
+                ? isPaused || isStopping
+                  ? 'paused'
+                  : 'on'
+                : ''
+            }`}
+          />
           {progress?.message || 'Chờ bắt đầu...'}
         </div>
         <strong className="progress-overall">{percent}%</strong>
@@ -85,6 +110,46 @@ export default function JobProgressView({ progress }: { progress: JobProgress | 
       {detail != null ? (
         <div className="bar bar-detail" title="Tiến độ render shot hiện tại trên Snapgen">
           <span style={{ width: `${detail}%` }} />
+        </div>
+      ) : null}
+
+      {canControl ? (
+        <div className="job-control-actions">
+          {!isPaused && !isStopping ? (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void window.studio.pauseJob()}
+              title="Ngừng tạo scene mới — tiết kiệm token"
+            >
+              Tạm dừng
+            </button>
+          ) : null}
+          {isPaused && !isStopping ? (
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => void window.studio.resumeJob()}
+            >
+              Tiếp tục
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="btn danger"
+            disabled={isStopping}
+            onClick={() => {
+              if (
+                window.confirm(
+                  'Dừng job? Scene còn lại sẽ bị bỏ (không tốn thêm token). Scene đã xong vẫn giữ.'
+                )
+              ) {
+                void window.studio.stopJob();
+              }
+            }}
+          >
+            {isStopping ? 'Đang dừng…' : 'Dừng'}
+          </button>
         </div>
       ) : null}
 

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { planSceneChunks, withStylePrompt } from '../../shared/models';
+import { buildSceneImagePrompt, planSceneChunks } from '../../shared/models';
 import type {
   ImageFamily,
   MediaKind,
@@ -33,10 +33,14 @@ export interface SceneGenerateContext {
   resolution: string;
   mode?: string;
   stylePrompt?: string;
+  /** Ngôn ngữ kịch bản — gắn locale vào prompt ảnh. */
+  language?: string;
   imagesDir: string;
   clipsDir: string;
   workDir: string;
   maxAttempts?: number;
+  /** true → hủy poll/retry (Stop). Pause không abort scene đang chạy. */
+  shouldAbort?: () => boolean;
 }
 
 export type SceneProgressUpdate = Partial<
@@ -65,13 +69,21 @@ export async function generateOneSceneMedia(
   sceneIndex: number,
   onProgress?: (update: SceneProgressUpdate) => void
 ): Promise<string> {
-  const prompt = withStylePrompt(scene.visual_prompt, ctx.stylePrompt);
+  const prompt = buildSceneImagePrompt({
+    visualPrompt: scene.visual_prompt,
+    narrationSegment: scene.narration_segment,
+    language: ctx.language,
+    stylePrompt: ctx.stylePrompt,
+  });
   const label = `Scene ${sceneIndex + 1}`;
   const maxAttempts = ctx.maxAttempts ?? 3;
 
   return withRetries(
     label,
     async (attempt) => {
+      if (ctx.shouldAbort?.()) {
+        throw new Error('Đã dừng bởi người dùng');
+      }
       if (attempt > 1) {
         onProgress?.({ state: 'retrying', attempt, detailPercent: 0, local01: 0 });
       }
@@ -89,15 +101,22 @@ export async function generateOneSceneMedia(
         });
 
         onProgress?.({ state: 'polling', attempt, detailPercent: 0, local01: 0 });
-        const hist = await waitForMedia(ctx.apiKey, job.uuid, 'image', (pct) => {
-          const shot = normalizeSnapgenPercent(pct);
-          onProgress?.({
-            state: 'polling',
-            attempt,
-            detailPercent: shot,
-            local01: shot / 100,
-          });
-        });
+        const hist = await waitForMedia(
+          ctx.apiKey,
+          job.uuid,
+          'image',
+          (pct) => {
+            const shot = normalizeSnapgenPercent(pct);
+            onProgress?.({
+              state: 'polling',
+              attempt,
+              detailPercent: shot,
+              local01: shot / 100,
+            });
+          },
+          30 * 60 * 1000,
+          ctx.shouldAbort
+        );
 
         const url = getImageUrl(hist);
         if (!url) throw new Error(`Thiếu image_url cho ${label}`);
@@ -120,6 +139,9 @@ export async function generateOneSceneMedia(
       let refHistory: string | null = null;
 
       for (let c = 0; c < plan.chunks.length; c++) {
+        if (ctx.shouldAbort?.()) {
+          throw new Error('Đã dừng bởi người dùng');
+        }
         const chunkDur = plan.chunks[c];
         const isFirst = c === 0;
         const chunkPrompt = isFirst
@@ -173,18 +195,25 @@ export async function generateOneSceneMedia(
           local01: chunkBase,
         });
 
-        const hist = await waitForMedia(ctx.apiKey, histUuid, 'video', (pct) => {
-          const shot = normalizeSnapgenPercent(pct);
-          const withinScene = (c + shot / 100) / plan.chunks.length;
-          onProgress?.({
-            state: 'polling',
-            attempt,
-            chunkIndex: c,
-            chunkTotal: plan.chunks.length,
-            detailPercent: shot,
-            local01: withinScene,
-          });
-        });
+        const hist = await waitForMedia(
+          ctx.apiKey,
+          histUuid,
+          'video',
+          (pct) => {
+            const shot = normalizeSnapgenPercent(pct);
+            const withinScene = (c + shot / 100) / plan.chunks.length;
+            onProgress?.({
+              state: 'polling',
+              attempt,
+              chunkIndex: c,
+              chunkTotal: plan.chunks.length,
+              detailPercent: shot,
+              local01: withinScene,
+            });
+          },
+          30 * 60 * 1000,
+          ctx.shouldAbort
+        );
 
         const url = hist.generated_video?.[0]?.video_url;
         if (!url) throw new Error(`Thiếu video_url cho ${label} đoạn ${c + 1}`);
@@ -208,6 +237,7 @@ export async function generateOneSceneMedia(
     },
     {
       maxAttempts,
+      shouldAbort: ctx.shouldAbort,
       onRetry: (attempt, err, delayMs) => {
         const msg = err instanceof Error ? err.message : String(err);
         onProgress?.({

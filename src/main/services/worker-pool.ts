@@ -9,6 +9,12 @@ export interface RunPoolOptions {
   concurrency: number;
   /** Gọi khi một task settle (ok hoặc lỗi) — index theo thứ tự input. */
   onSettled?: (index: number, result: PromiseSettledResult<unknown>) => void;
+  /** true = tạm dừng nhận task mới (chờ resume). */
+  isPaused?: () => boolean;
+  /** true = dừng hẳn, bỏ task còn lại. */
+  shouldStop?: () => boolean;
+  /** Gọi khi task bị skip vì stop/pause-exit. */
+  onSkip?: (index: number) => void;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -18,19 +24,37 @@ function sleep(ms: number): Promise<void> {
 /**
  * Chạy `tasks` với giới hạn concurrency. Giữ thứ tự kết quả theo index.
  * Task lỗi → reject phần tử đó; các worker khác vẫn chạy.
+ * Pause: worker chưa cầm task mới sẽ chờ. Stop: bỏ task chưa chạy.
  */
 export async function runPool<T>(
   tasks: Array<PoolTask<T>>,
   options: RunPoolOptions
 ): Promise<Array<PromiseSettledResult<T>>> {
   const concurrency = Math.max(1, Math.min(options.concurrency, tasks.length || 1));
-  const results: Array<PromiseSettledResult<T>> = new Array(tasks.length);
+  const results: Array<PromiseSettledResult<T> | undefined> = new Array(tasks.length);
   let nextIndex = 0;
+
+  async function waitIfPaused(): Promise<boolean> {
+    while (options.isPaused?.() && !options.shouldStop?.()) {
+      await sleep(250);
+    }
+    return Boolean(options.shouldStop?.());
+  }
 
   async function worker(): Promise<void> {
     for (;;) {
+      if (await waitIfPaused()) break;
+
       const index = nextIndex++;
       if (index >= tasks.length) return;
+
+      // Stop: không start Snapgen mới — bỏ task này và thoát (phần còn lại skip ở cuối).
+      if (options.shouldStop?.()) {
+        options.onSkip?.(index);
+        results[index] = { status: 'rejected', reason: new Error('SKIPPED') };
+        break;
+      }
+
       try {
         const value = await tasks[index]();
         const settled: PromiseFulfilledResult<T> = { status: 'fulfilled', value };
@@ -46,7 +70,16 @@ export async function runPool<T>(
 
   const workers = Array.from({ length: concurrency }, () => worker());
   await Promise.all(workers);
-  return results;
+
+  // Task chưa được gán (stop giữa chừng) → skip.
+  for (let i = 0; i < tasks.length; i++) {
+    if (results[i] === undefined) {
+      options.onSkip?.(i);
+      results[i] = { status: 'rejected', reason: new Error('SKIPPED') };
+    }
+  }
+
+  return results as Array<PromiseSettledResult<T>>;
 }
 
 export function isRetryableMediaError(err: unknown): boolean {
@@ -63,6 +96,7 @@ export async function withRetries<T>(
     maxAttempts?: number;
     baseDelayMs?: number;
     onRetry?: (attempt: number, err: unknown, delayMs: number) => void;
+    shouldAbort?: () => boolean;
   }
 ): Promise<T> {
   const maxAttempts = Math.max(1, options?.maxAttempts ?? 3);
@@ -70,15 +104,27 @@ export async function withRetries<T>(
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (options?.shouldAbort?.()) {
+      throw new Error(`${label}: đã dừng bởi người dùng`);
+    }
     try {
       return await fn(attempt);
     } catch (err) {
       lastError = err;
+      if (options?.shouldAbort?.()) {
+        throw new Error(`${label}: đã dừng bởi người dùng`);
+      }
       const retryable = isRetryableMediaError(err);
       if (!retryable || attempt >= maxAttempts) break;
       const delayMs = Math.min(30_000, baseDelayMs * 2 ** (attempt - 1));
       options?.onRetry?.(attempt, err, delayMs);
-      await sleep(delayMs);
+      const until = Date.now() + delayMs;
+      while (Date.now() < until) {
+        if (options?.shouldAbort?.()) {
+          throw new Error(`${label}: đã dừng bởi người dùng`);
+        }
+        await sleep(Math.min(250, until - Date.now()));
+      }
     }
   }
 

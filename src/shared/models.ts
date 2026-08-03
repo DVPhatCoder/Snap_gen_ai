@@ -384,6 +384,120 @@ export function withStylePrompt(visualPrompt: string, stylePrompt?: string): str
   return `${visualPrompt.trim()}. Style: ${style}`;
 }
 
+/** Gợi ý văn hóa / nhân vật theo language setting — dùng cho image prompt. */
+export function resolveVisualLocaleHint(language?: string | null): string | null {
+  const value = String(language || '').toLowerCase();
+  if (!value) return null;
+  if (/japan|日本語|nihongo|tiếng nhật|nhật bản|\bja\b/.test(value)) {
+    return 'Japanese cultural setting; when people appear, depict them as Japanese with accurate age, clothing, and environment matching the narration';
+  }
+  if (/việt|vietnam|tiếng việt|\bvi\b/.test(value)) {
+    return 'Vietnamese cultural setting; when people appear, depict them as Vietnamese with accurate age, clothing, and environment matching the narration';
+  }
+  if (/korean|한국어|hangul|tiếng hàn|hàn quốc|\bko\b/.test(value)) {
+    return 'Korean cultural setting; when people appear, depict them as Korean with accurate age, clothing, and environment matching the narration';
+  }
+  if (/chinese|中文|mandarin|cantonese|tiếng trung|trung quốc|\bzh\b/.test(value)) {
+    return 'Chinese cultural setting; when people appear, depict them as Chinese with accurate age, clothing, and environment matching the narration';
+  }
+  if (/english|tiếng anh|\ben\b/.test(value)) {
+    return 'English-language / Western cultural setting when people and places appear; match the narration';
+  }
+  if (/thai|ไทย|tiếng thái|\bth\b/.test(value)) {
+    return 'Thai cultural setting; when people appear, depict them as Thai with accurate age, clothing, and environment matching the narration';
+  }
+  return `Cultural setting matching language "${String(language).trim()}"; people and places must match that locale and the narration`;
+}
+
+/**
+ * Khóa chữ trên ảnh: chỉ được hiện script của Language đã chọn (hoặc không có chữ).
+ * Cấm mọi ngôn ngữ / bảng chữ khác.
+ */
+export function resolveVisualLanguageLock(language?: string | null): string {
+  const label = String(language || '').trim() || 'the selected language';
+  const value = label.toLowerCase();
+
+  let allowedScript: string;
+  let forbidExtra: string;
+  if (/japan|日本語|nihongo|tiếng nhật|nhật bản|\bja\b/.test(value)) {
+    allowedScript = 'Japanese only (hiragana, katakana, and/or kanji)';
+    forbidExtra =
+      'no English Latin letters, no Vietnamese, no Korean Hangul, no Simplified/Traditional Chinese-only signage, no Thai, no other languages';
+  } else if (/việt|vietnam|tiếng việt|\bvi\b/.test(value)) {
+    allowedScript = 'Vietnamese only (Latin with Vietnamese diacritics)';
+    forbidExtra =
+      'no English-only signs, no Japanese, no Korean, no Chinese, no Thai, no other languages';
+  } else if (/korean|한국어|hangul|tiếng hàn|hàn quốc|\bko\b/.test(value)) {
+    allowedScript = 'Korean Hangul only';
+    forbidExtra =
+      'no English Latin letters, no Japanese, no Chinese, no Vietnamese, no Thai, no other languages';
+  } else if (/chinese|中文|mandarin|cantonese|tiếng trung|trung quốc|\bzh\b/.test(value)) {
+    allowedScript = 'Chinese characters only';
+    forbidExtra =
+      'no English Latin letters, no Japanese kana, no Korean Hangul, no Vietnamese, no Thai, no other languages';
+  } else if (/english|tiếng anh|\ben\b/.test(value)) {
+    allowedScript = 'English only';
+    forbidExtra =
+      'no Japanese, no Korean, no Chinese, no Vietnamese, no Thai, no other non-English languages';
+  } else if (/thai|ไทย|tiếng thái|\bth\b/.test(value)) {
+    allowedScript = 'Thai script only';
+    forbidExtra =
+      'no English Latin letters, no Japanese, no Korean, no Chinese, no Vietnamese, no other languages';
+  } else {
+    allowedScript = `${label} only`;
+    forbidExtra = `no text in any language other than ${label}`;
+  }
+
+  return (
+    `LANGUAGE LOCK (mandatory): Selected language is "${label}". ` +
+    `All people, places, props, clothing, and atmosphere MUST match this language/culture. ` +
+    `If any readable text appears (signs, labels, screens, books, posters, UI), it MUST be ${allowedScript}. ` +
+    `Prefer no text when unsure. Strictly forbid mixed-language text: ${forbidExtra}.`
+  );
+}
+
+/**
+ * Prompt gửi Snapgen: visual + style + locale + khóa language + trung thành lời thoại.
+ * visual_prompt ưu tiên English mô tả hình; chữ trong ảnh chỉ theo Language đã chọn.
+ */
+export function buildSceneImagePrompt(options: {
+  visualPrompt: string;
+  narrationSegment?: string;
+  language?: string | null;
+  stylePrompt?: string;
+}): string {
+  let prompt = withStylePrompt(options.visualPrompt || '', options.stylePrompt);
+  const locale = resolveVisualLocaleHint(options.language);
+  const languageLock = resolveVisualLanguageLock(options.language);
+  const lower = prompt.toLowerCase();
+
+  if (locale) {
+    const localeAlready =
+      /japanese|vietnamese|korean|chinese|thai|english-language|cultural setting|locale/.test(
+        lower
+      ) || lower.includes(locale.slice(0, 24).toLowerCase());
+    if (!localeAlready) {
+      prompt = `${prompt.trim()}. Visual locale: ${locale}.`;
+    }
+  }
+
+  if (!lower.includes('language lock')) {
+    prompt = `${prompt.trim()} ${languageLock}`;
+  }
+
+  const narration = String(options.narrationSegment || '').replace(/\s+/g, ' ').trim();
+  if (narration) {
+    const excerpt = narration.length > 280 ? `${narration.slice(0, 277)}…` : narration;
+    const fidelity =
+      'Match this narration exactly for who/what/where (age, gender, ethnicity, clothing, place, action) — do not swap characters or culture.';
+    if (!lower.includes('match this narration')) {
+      prompt = `${prompt.trim()} ${fidelity} Narration context: "${excerpt}"`;
+    }
+  }
+
+  return prompt.trim();
+}
+
 /** Fallback when a model has no declared durations (not a hard scene length). */
 export const DEFAULT_DURATION_PER_SCENE = 8;
 
@@ -673,6 +787,13 @@ export function mergeUndersizedScenes<
       (prev.chapter || '').trim().toLowerCase() === (scene.chapter || '').trim().toLowerCase();
     if (prev && sameBucket && spoken > 0 && spoken < MIN_SCENE_BEAT_SEC) {
       prev.narration_segment = `${(prev.narration_segment || '').trim()} ${(scene.narration_segment || '').trim()}`.trim();
+      const prevVisual = (prev.visual_prompt || '').trim();
+      const nextVisual = (scene.visual_prompt || '').trim();
+      if (nextVisual && nextVisual !== prevVisual) {
+        prev.visual_prompt = prevVisual
+          ? `${prevVisual}. Also: ${nextVisual}`
+          : nextVisual;
+      }
       continue;
     }
     out.push({ ...scene });
@@ -687,6 +808,13 @@ export function mergeUndersizedScenes<
       (prev.chapter || '').trim().toLowerCase() === (last.chapter || '').trim().toLowerCase();
     if (sameBucket && spoken > 0 && spoken < MIN_SCENE_BEAT_SEC) {
       prev.narration_segment = `${(prev.narration_segment || '').trim()} ${(last.narration_segment || '').trim()}`.trim();
+      const prevVisual = (prev.visual_prompt || '').trim();
+      const nextVisual = (last.visual_prompt || '').trim();
+      if (nextVisual && nextVisual !== prevVisual) {
+        prev.visual_prompt = prevVisual
+          ? `${prevVisual}. Also: ${nextVisual}`
+          : nextVisual;
+      }
       out.pop();
     }
   }

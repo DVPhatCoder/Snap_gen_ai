@@ -961,7 +961,9 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
       setGenerateOpen(false);
       setToast({
         type: 'ok',
-        text: `Đã generate ${payload.regenerateSceneIds.length} scene và ghép Final (voiceover sync từng scene).`,
+        text: generated.stopped
+          ? `Đã dừng. Xong ${generated.scenesCompleted ?? 0}/${generated.scenesTotal ?? '?'} scene — Generate lại scene còn thiếu khi sẵn sàng.`
+          : `Đã generate ${payload.regenerateSceneIds.length} scene và ghép Final (voiceover sync từng scene).`,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1543,7 +1545,7 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
           </div>
           {busy && progress && (
             <div className="generation-overlay">
-              <JobProgressView progress={progress} />
+              <JobProgressView progress={progress} showControls />
             </div>
           )}
         </main>

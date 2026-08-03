@@ -264,6 +264,7 @@ export type JobPhase =
   | 'video'
   | 'image'
   | 'merge'
+  | 'paused'
   | 'done'
   | 'error';
 
@@ -277,6 +278,8 @@ export type SceneJobState =
   | 'cached'
   | 'failed'
   | 'skipped';
+
+export type JobControlState = 'running' | 'paused' | 'stop';
 
 export interface SceneJobProgress {
   sceneIndex: number;
@@ -307,6 +310,8 @@ export interface JobProgress {
   maxConcurrent?: number;
   /** Snapshot trạng thái từng scene (worker pool). */
   sceneStatuses?: SceneJobProgress[];
+  /** Điều khiển từ UI: tạm dừng / dừng. */
+  control?: JobControlState;
 }
 
 export type ActiveJobKind = 'generate' | 'remux';
@@ -319,6 +324,7 @@ export interface ActiveJobSnapshot {
   kind: ActiveJobKind | null;
   progress: JobProgress | null;
   startedAt: number | null;
+  control?: JobControlState;
 }
 
 export interface JobFinishedEvent {
@@ -337,6 +343,10 @@ export interface GenerateJobResult {
   srtPath: string;
   audioPath: string;
   title: string;
+  /** User dừng giữa chừng — chỉ một phần scene được tạo. */
+  stopped?: boolean;
+  scenesCompleted?: number;
+  scenesTotal?: number;
 }
 
 export interface ConnectionTestResult {

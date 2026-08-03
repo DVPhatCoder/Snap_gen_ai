@@ -112,6 +112,9 @@ const api = {
   startGenerate: (input: GenerateJobInput): Promise<GenerateJobResult> =>
     ipcRenderer.invoke(IPC.startGenerate, input),
   getActiveJob: (): Promise<ActiveJobSnapshot> => ipcRenderer.invoke(IPC.getActiveJob),
+  pauseJob: (): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke(IPC.pauseJob),
+  resumeJob: (): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke(IPC.resumeJob),
+  stopJob: (): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke(IPC.stopJob),
   onJobProgress: (cb: (p: JobProgress) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, p: JobProgress) => cb(p);
     ipcRenderer.on(IPC.jobProgress, listener);

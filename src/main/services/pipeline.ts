@@ -20,6 +20,13 @@ import type {
   ScriptDraft,
 } from '../../shared/types';
 import { getKeys, getSettings } from '../store';
+import {
+  getActiveJob,
+  isJobPaused,
+  isJobStopRequested,
+  setActiveJobProgress,
+  updateActiveJobMeta,
+} from '../job-state';
 import { resolveProjectChatModel, resolveProjectVoice } from '../../shared/voice';
 import { rewriteNarrationToMatchDuration } from './openai';
 import { generateOneSceneMedia } from './scene-generate';
@@ -52,7 +59,6 @@ import {
   collectSceneMediaPaths,
   resolveSceneMedia,
 } from './scene-media';
-import { setActiveJobProgress, updateActiveJobMeta } from '../job-state';
 
 const DEFAULT_MAX_CONCURRENT_SCENES = 5;
 const MAX_SCENE_GENERATE_ATTEMPTS = 3;
@@ -94,7 +100,8 @@ function emitProgress(progress: JobProgress): void {
   lastOverallPercent = percent;
   const next = { ...progress, percent };
   setActiveJobProgress(next);
-  emit(next);
+  // Emit snapshot sau khi apply pause/stop message.
+  emit(getActiveJob().progress || next);
 }
 
 /** Media generation spans 12% → 90% of the overall bar (theo số scene hoàn tất + local). */
@@ -684,6 +691,28 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
     const durations = narration.durations;
     persistScript(meta.id, script);
 
+    if (isJobStopRequested()) {
+      updateProjectStatus(meta.id, 'draft', { hasVideo: false, lastError: '' });
+      emitProgress({
+        phase: 'done',
+        message: 'Đã dừng trước khi render scene.',
+        percent: 12,
+        control: 'stop',
+      });
+      return {
+        projectId: meta.id,
+        projectName: meta.name,
+        projectDir,
+        videoPath: '',
+        srtPath,
+        audioPath,
+        title: script.title,
+        stopped: true,
+        scenesCompleted: 0,
+        scenesTotal: script.scenes.length,
+      };
+    }
+
     emitProgress({
       phase: 'whisper',
       message:
@@ -787,6 +816,9 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
     if (workIndexes.length) {
       const settled = await runPool(
         workIndexes.map((i) => async () => {
+          if (isJobStopRequested()) {
+            throw new Error('SKIPPED');
+          }
           const scene = scenes[i];
           sceneStatuses[i] = {
             ...sceneStatuses[i],
@@ -807,10 +839,12 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
               resolution: input.resolution,
               mode: input.mode,
               stylePrompt: input.stylePrompt,
+              language: input.language,
               imagesDir,
               clipsDir,
               workDir,
               maxAttempts: MAX_SCENE_GENERATE_ATTEMPTS,
+              shouldAbort: () => isJobStopRequested(),
             },
             scene,
             i,
@@ -834,10 +868,25 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
           emitPoolProgress(i);
           return mediaPath;
         }),
-        { concurrency: Math.min(maxConcurrent, workIndexes.length) }
+        {
+          concurrency: Math.min(maxConcurrent, workIndexes.length),
+          isPaused: () => isJobPaused(),
+          shouldStop: () => isJobStopRequested(),
+          onSkip: (taskIdx) => {
+            const sceneIndex = workIndexes[taskIdx];
+            sceneStatuses[sceneIndex] = {
+              ...sceneStatuses[sceneIndex],
+              state: 'skipped',
+              detailPercent: 0,
+              error: 'Đã dừng — bỏ scene để tiết kiệm token',
+            };
+            emitPoolProgress();
+          },
+        }
       );
 
       const failures: string[] = [];
+      let skippedCount = 0;
       settled.forEach((result, taskIdx) => {
         const sceneIndex = workIndexes[taskIdx];
         if (result.status === 'fulfilled') return;
@@ -845,6 +894,16 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
           result.reason instanceof Error
             ? result.reason.message
             : String(result.reason);
+        if (/SKIPPED|đã dừng bởi người dùng/i.test(reason) || isJobStopRequested()) {
+          skippedCount += 1;
+          sceneStatuses[sceneIndex] = {
+            ...sceneStatuses[sceneIndex],
+            state: 'skipped',
+            error: 'Đã dừng — bỏ scene để tiết kiệm token',
+            detailPercent: 0,
+          };
+          return;
+        }
         sceneStatuses[sceneIndex] = {
           ...sceneStatuses[sceneIndex],
           state: 'failed',
@@ -855,6 +914,56 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
         failures.push(`Scene ${sceneIndex + 1}: ${reason}`);
       });
       emitPoolProgress();
+
+      if (isJobStopRequested() || skippedCount > 0) {
+        const done = sceneStatuses.filter(
+          (s) => s.state === 'completed' || s.state === 'cached'
+        ).length;
+        // Lưu manifest partial — không merge nếu thiếu scene.
+        const partialManifest = scenes.map((scene, index) => ({
+          sceneId: scene.id,
+          sceneIndex: index,
+          prompt: scene.visual_prompt,
+          duration: scene.duration_hint,
+          mediaPath: mediaPaths[index] || null,
+          mediaKind,
+          state: sceneStatuses[index]?.state,
+        }));
+        fs.writeFileSync(
+          path.join(projectDir, 'scene-manifest.json'),
+          JSON.stringify(partialManifest, null, 2),
+          'utf8'
+        );
+
+        const existingFinal = path.join(projectDir, 'final.mp4');
+        const hasFinal = fs.existsSync(existingFinal);
+        updateProjectStatus(meta.id, hasFinal || done > 0 ? 'ready' : 'draft', {
+          hasVideo: hasFinal,
+          lastError: '',
+        });
+        emitProgress({
+          phase: 'done',
+          message: `Đã dừng. Xong ${done}/${scenes.length} scene — Generate lại scene còn thiếu khi sẵn sàng.`,
+          percent: Math.max(lastOverallPercent, mediaOverallPercentFromPool(done, scenes.length)),
+          scenesCompleted: done,
+          scenesFailed: failures.length,
+          sceneTotal: scenes.length,
+          sceneStatuses: sceneStatuses.map((s) => ({ ...s })),
+          control: 'stop',
+        });
+        return {
+          projectId: meta.id,
+          projectName: meta.name,
+          projectDir,
+          videoPath: hasFinal ? existingFinal : '',
+          srtPath,
+          audioPath,
+          title: script.title,
+          stopped: true,
+          scenesCompleted: done,
+          scenesTotal: scenes.length,
+        };
+      }
 
       if (failures.length) {
         throw new Error(

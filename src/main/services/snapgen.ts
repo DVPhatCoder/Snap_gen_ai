@@ -345,12 +345,16 @@ export async function waitForMedia(
   uuid: string,
   kind: 'video' | 'image',
   onProgress?: (percent: number, status: number) => void,
-  timeoutMs = 30 * 60 * 1000
+  timeoutMs = 30 * 60 * 1000,
+  shouldAbort?: () => boolean
 ): Promise<SnapgenHistory> {
   const started = Date.now();
   let delay = 4000;
 
   while (Date.now() - started < timeoutMs) {
+    if (shouldAbort?.()) {
+      throw new Error('Đã dừng bởi người dùng (bỏ chờ Snapgen).');
+    }
     const hist = await getHistory(apiKey, uuid);
     let pct = hist.status_percentage ?? 0;
     // Some Snapgen responses use 0–1 instead of 0–100.
@@ -379,7 +383,13 @@ export async function waitForMedia(
       );
     }
 
-    await sleep(delay);
+    const until = Date.now() + delay;
+    while (Date.now() < until) {
+      if (shouldAbort?.()) {
+        throw new Error('Đã dừng bởi người dùng (bỏ chờ Snapgen).');
+      }
+      await sleep(Math.min(400, until - Date.now()));
+    }
     delay = Math.min(delay + 2000, 15000);
   }
 

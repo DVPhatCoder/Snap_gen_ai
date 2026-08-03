@@ -35,8 +35,8 @@ import {
   installLocalMediaProtocol,
   registerLocalMediaScheme,
 } from './services/local-media';
-import { beginJob, endJob, getActiveJob, isJobActive } from './job-state';
-import type { JobFinishedEvent } from '../shared/types';
+import { beginJob, endJob, getActiveJob, isJobActive, pauseActiveJob, resumeActiveJob, stopActiveJob } from './job-state';
+import type { JobFinishedEvent, JobProgress } from '../shared/types';
 import {
   createProject,
   deleteProject,
@@ -256,6 +256,31 @@ function registerIpc(): void {
   });
 
   ipcMain.handle(IPC.getActiveJob, () => getActiveJob());
+
+  const emitJobProgressNow = () => {
+    const snap = getActiveJob();
+    if (!snap.progress) return;
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send(IPC.jobProgress, snap.progress as JobProgress);
+    }
+  };
+
+  ipcMain.handle(IPC.pauseJob, () => {
+    const result = pauseActiveJob();
+    emitJobProgressNow();
+    return result;
+  });
+  ipcMain.handle(IPC.resumeJob, () => {
+    const result = resumeActiveJob();
+    emitJobProgressNow();
+    return result;
+  });
+  ipcMain.handle(IPC.stopJob, () => {
+    const result = stopActiveJob();
+    emitJobProgressNow();
+    return result;
+  });
+
   ipcMain.handle(IPC.listProjects, () => listProjects());
   ipcMain.handle(IPC.getProject, (_e, id: string) => getProject(id));
   ipcMain.handle(IPC.createProject, (_e, input: CreateProjectInput) => createProject(input));

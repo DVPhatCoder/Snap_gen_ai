@@ -97,10 +97,10 @@ export default function GenerateScenesDialog({
 
         {busy ? (
           <div className="generate-running">
-            <JobProgressView progress={progress ?? null} />
+            <JobProgressView progress={progress ?? null} showControls />
             <p className="hint">
-              Mỗi shot Snapgen mất khoảng 80–90 giây. Cảnh dài hơn giới hạn model sẽ tách thành
-              nhiều shot nên lâu hơn.
+              Thấy ảnh/video không đúng tiêu chí? Bấm <strong>Tạm dừng</strong> (ngừng scene mới) hoặc{' '}
+              <strong>Dừng</strong> để khỏi tốn token. Mỗi shot Snapgen mất khoảng 80–90 giây.
             </p>
           </div>
         ) : (

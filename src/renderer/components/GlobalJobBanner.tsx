@@ -79,9 +79,34 @@ export default function GlobalJobBanner({
             Mở dự án
           </button>
         ) : null}
+        {(progress?.control || job.progress?.control) !== 'stop' &&
+        (progress?.phase || job.progress?.phase) !== 'done' ? (
+          <>
+            {(progress?.control || job.control) === 'paused' ? (
+              <button type="button" className="btn primary" onClick={() => void window.studio.resumeJob()}>
+                Tiếp tục
+              </button>
+            ) : (
+              <button type="button" className="btn" onClick={() => void window.studio.pauseJob()}>
+                Tạm dừng
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn danger"
+              onClick={() => {
+                if (window.confirm('Dừng job? Scene còn lại sẽ bị bỏ để tiết kiệm token.')) {
+                  void window.studio.stopJob();
+                }
+              }}
+            >
+              Dừng
+            </button>
+          </>
+        ) : null}
       </div>
       <div className="global-job-banner-bar">
-        <JobProgressView progress={progress || job.progress} />
+        <JobProgressView progress={progress || job.progress} showControls />
       </div>
     </div>
   );

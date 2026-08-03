@@ -16,6 +16,8 @@ import {
   MIN_SCENE_BEAT_SEC,
   normalizeSceneDurations,
   planScenesFromDuration,
+  resolveVisualLanguageLock,
+  resolveVisualLocaleHint,
   spokenBudgetForDurationSec,
   WORDS_PER_SECOND,
 } from '../../shared/models';
@@ -305,7 +307,8 @@ export async function testOpenAI(apiKey: string): Promise<{ ok: boolean; message
 function splitNarrationFallback(
   narration: string,
   chapter: ChapterOutline,
-  typicalBeatSec: number
+  typicalBeatSec: number,
+  language?: string
 ): SceneDraft[] {
   const text = narration.trim();
   if (!text) return [];
@@ -344,17 +347,24 @@ function splitNarrationFallback(
     }
   }
 
-  return merged.map((segment, index) => ({
-    id: `scene-tmp-${index + 1}`,
-    visual_prompt: `Cinematic shot for ${chapter.name}, beat ${index + 1}: illustrate the spoken idea clearly.`,
-    narration_segment: segment,
-    duration_hint: Math.max(
-      MIN_SCENE_BEAT_SEC,
-      Math.round(estimateSpokenSeconds(segment, typicalBeatSec) * 10) / 10
-    ),
-    section: chapter.section,
-    chapter: chapter.name,
-  }));
+  const locale = resolveVisualLocaleHint(language);
+  const languageLock = resolveVisualLanguageLock(language);
+  return merged.map((segment, index) => {
+    const excerpt = segment.replace(/\s+/g, ' ').trim().slice(0, 160);
+    const base = `Cinematic still for chapter "${chapter.name}", beat ${index + 1}: illustrate this spoken idea — "${excerpt}"`;
+    const withLocale = locale ? `${base}. ${locale}.` : base;
+    return {
+      id: `scene-tmp-${index + 1}`,
+      visual_prompt: `${withLocale} ${languageLock}`,
+      narration_segment: segment,
+      duration_hint: Math.max(
+        MIN_SCENE_BEAT_SEC,
+        Math.round(estimateSpokenSeconds(segment, typicalBeatSec) * 10) / 10
+      ),
+      section: chapter.section,
+      chapter: chapter.name,
+    };
+  });
 }
 
 /**
@@ -378,6 +388,8 @@ export async function generateScript(
     ? `- Global visual style (MUST apply to every visual_prompt): ${input.stylePrompt.trim()}`
     : '- Keep visual continuity across scenes.';
 
+  const localeHint = resolveVisualLocaleHint(input.language);
+  const languageLock = resolveVisualLanguageLock(input.language);
   const visualRule = isImage
     ? '- visual_prompt: one clear still composition. One idea per image.'
     : '- visual_prompt: one primary action/image per scene. Hard cut between scenes.';
@@ -385,6 +397,14 @@ export async function generateScript(
   const sharedRules = `Language for narration: ${input.language}
 ${visualRule}
 ${styleLine}
+VISUAL FIDELITY (critical — image/video must match the script AND the selected Language):
+- Write visual_prompt in clear English (best for image models), but the CONTENT must always follow Language "${input.language}".
+- visual_prompt MUST depict the SAME people/objects/places as narration_segment: age, gender, role, ethnicity/nationality, clothing, setting, action.
+- Selected language "${input.language}" locks culture AND on-image text.${localeHint ? ` Locale rule: ${localeHint}.` : ''}
+- ${languageLock}
+- Every visual_prompt must explicitly mention the selected language/culture (e.g. Japanese setting / Vietnamese characters) so image models cannot drift to another language.
+- Example: narration about an elderly Japanese person → "Elderly Japanese man/woman …" in a Japanese setting with Japanese-only text if any — NEVER a young Western character or English/Chinese signs.
+- Do NOT invent a different character, age, or culture than the spoken content.
 - Each scene = ONE main idea OR ONE primary visual (~${MIN_SCENE_BEAT_SEC}–${MAX_SCENE_BEAT_SEC}s spoken, ideal ~${plan.typicalBeatSec}s).
 - duration_hint ≈ spoken length of narration_segment (~${WORDS_PER_SECOND} words/sec).
 - Narration is continuous voiceover across scenes; write full host sentences, not captions.
@@ -542,10 +562,12 @@ CRITICAL: Concatenating all narration_segment MUST preserve the given narration 
         model: openaiModel,
         system: splitSystem,
         user: `Chapter "${chapter.name}" · section=${chapter.section} · ~${sceneHint} scenes
+Language setting (LOCKED for all visuals): ${input.language}${localeHint ? `\nLocale for visuals: ${localeHint}` : ''}
+Language lock: ${languageLock}
 Full narration to split (preserve EVERY word across segments):
 """${narration}"""
 
-Return scenes. All scenes.chapter="${chapter.name}", scenes.section="${chapter.section}".`,
+For EACH scene: write visual_prompt that mirrors THAT narration_segment (same age/person/culture/setting) AND stays inside Language "${input.language}" only (no other-language text in the image). All scenes.chapter="${chapter.name}", scenes.section="${chapter.section}".`,
         temperature: 0.4,
       });
       chapterScenes = mapRawScenes(parsed.scenes || []).map((s) => ({
@@ -561,12 +583,22 @@ Return scenes. All scenes.chapter="${chapter.name}", scenes.section="${chapter.s
     const srcSec = estimateSpokenSeconds(narration, 0);
     const outSec = estimateSpokenSeconds(joined, 0);
     if (!chapterScenes.length || outSec < srcSec * 0.85) {
-      chapterScenes = splitNarrationFallback(narration, chapter, plan.typicalBeatSec);
+      chapterScenes = splitNarrationFallback(
+        narration,
+        chapter,
+        plan.typicalBeatSec,
+        input.language
+      );
     }
 
     if (needsBeatSplit(chapterScenes)) {
       const full = chapterScenes.map((s) => s.narration_segment).join(' ') || narration;
-      chapterScenes = splitNarrationFallback(full, chapter, plan.typicalBeatSec);
+      chapterScenes = splitNarrationFallback(
+        full,
+        chapter,
+        plan.typicalBeatSec,
+        input.language
+      );
     }
 
     allScenes.push(...chapterScenes);
@@ -606,7 +638,8 @@ Return { "continuation": "<new sentences only, ≥ ${deficitBudget.amount} ${def
     const rebuilt = splitNarrationFallback(
       targetChapter.narration,
       targetChapter.chapter,
-      plan.typicalBeatSec
+      plan.typicalBeatSec,
+      input.language
     );
     const nextScenes: SceneDraft[] = [];
     let replaced = false;
@@ -648,6 +681,8 @@ export async function rewriteNarrationToMatchDuration(options: {
   const actual = Math.max(0.1, actualAudioSec);
   const ratio = target / actual;
   const tooShort = actual < target;
+  const localeHint = resolveVisualLocaleHint(language);
+  const languageLock = resolveVisualLanguageLock(language);
 
   const system = `You adjust voiceover length to match a measured TTS runtime.
 Return ONLY valid JSON with scenes including section, chapter, visual_prompt, narration_segment, duration_hint.
@@ -657,7 +692,9 @@ Rules:
 - Prefer keeping the same chapters and scene ideas; you MAY split/merge slightly if needed for ${MIN_SCENE_BEAT_SEC}–${MAX_SCENE_BEAT_SEC}s beats.
 - Scale spoken length ≈ ${ratio.toFixed(3)}× (${tooShort ? 'EXPAND' : 'COMPRESS'}).
 - Narration must naturally fill each scene duration (~${WORDS_PER_SECOND} words/sec).
-- One idea / one visual per scene. Continuous voiceover across scenes.`;
+- One idea / one visual per scene. Continuous voiceover across scenes.
+- visual_prompt MUST stay faithful to narration_segment (same age, person, culture, setting) AND Language "${language}" only.${localeHint ? ` ${localeHint}.` : ''}
+- ${languageLock}`;
 
   const sceneLines = script.scenes
     .map((s, i) => {
