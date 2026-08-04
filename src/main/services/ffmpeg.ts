@@ -559,28 +559,29 @@ export async function assembleFinalVideo(options: {
 }
 
 /**
- * Ken Burns chất lượng cũ: oversample 5K + zoompan 1080p @60 → 720p.
- * Performance tăng ở lớp song song + GPU encode, không giảm filter này.
+ * Ken Burns zoom-in mượt @ 60fps:
+ * - Zoom nhẹ (~8%), cosine ease-in-out
+ * - Render + xuất 60fps (không drop xuống 30)
+ * - Oversample cao để nét, tâm zoom ổn định
  */
 function kenBurnsFilters(durationSec: number): string[] {
-  const renderFps = 60;
-  const outFps = 30;
-  const frames = Math.max(Math.round(durationSec * renderFps), renderFps);
+  const fps = 60;
+  const frames = Math.max(Math.round(durationSec * fps), fps);
   const last = Math.max(frames - 1, 1);
-  const zMax = 1.15;
-  const delta = zMax - 1;
+  const zMax = 1.08;
+  const delta = (zMax - 1).toFixed(8);
 
   const t = `min(1\\,on/${last})`;
-  const zExpr = `1+${delta.toFixed(8)}*((${t})*(${t})*(3-2*(${t})))`;
+  const zExpr = `1+${delta}*(0.5-0.5*cos(PI*(${t})))`;
+  const xExpr = 'iw/2-(iw/zoom/2)';
+  const yExpr = 'ih/2-(ih/zoom/2)';
 
   return [
-    'scale=5120:2880:force_original_aspect_ratio=increase:flags=lanczos',
-    'crop=5120:2880',
+    'scale=3840:2160:force_original_aspect_ratio=increase:flags=lanczos',
+    'crop=3840:2160',
     'setsar=1',
     'format=yuv420p',
-    `zoompan=z='${zExpr}':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1920x1080:fps=${renderFps}`,
-    'scale=1280:720:flags=lanczos',
-    `fps=${outFps}`,
+    `zoompan=z='${zExpr}':d=${frames}:x='${xExpr}':y='${yExpr}':s=1280x720:fps=${fps}`,
   ];
 }
 
@@ -629,7 +630,7 @@ export async function assembleSlideshowFromImages(options: {
     }
     const out = path.join(workDir, `img-clip-${i}.mp4`);
     const dur = Math.max(durations?.[i] ?? fallback, 1);
-    const outFrames = Math.max(Math.round(dur * 30), 30);
+    const outFrames = Math.max(Math.round(dur * 60), 60);
     try {
       const cmd = ffmpeg(imagePath)
         .inputOptions(['-loop', '1', '-framerate', '60'])
@@ -639,7 +640,7 @@ export async function assembleSlideshowFromImages(options: {
         String(outFrames),
         '-an',
         '-r',
-        '30',
+        '60',
       ]);
       await run(cmd.output(out));
     } catch (err) {
