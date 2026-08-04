@@ -324,6 +324,45 @@ h2 {
   padding: 0 10px;
 }
 
+.secret-input {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.secret-input input {
+  width: 100%;
+  padding-right: 56px;
+}
+
+.secret-eye {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.secret-eye:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.secret-eye:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .field textarea {
   min-height: 90px;
   padding: 9px 10px;
@@ -3118,7 +3157,9 @@ h2 {
 }
 
 .el-keys-add input,
-.el-key-edit input {
+.el-keys-add .secret-input input,
+.el-key-edit input,
+.el-key-edit .secret-input input {
   width: 100%;
   min-width: 0;
   height: 36px;
@@ -3130,6 +3171,11 @@ h2 {
   background: #0e1014;
   caret-color: var(--accent);
   transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.el-keys-add .secret-input input,
+.el-key-edit .secret-input input {
+  padding-right: 56px;
 }
 
 .el-keys-add input::placeholder,
@@ -3183,7 +3229,9 @@ h2 {
   margin: 4px 0 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-  color: #b7bdc9;
+  color: var(--muted);
+  word-break: break-all;
+  user-select: text;
 }
 
 .el-key-badges {

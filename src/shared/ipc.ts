@@ -25,6 +25,7 @@ export const IPC = {
   elevenLabsMoveApiKey: 'elevenlabs:moveApiKey',
   elevenLabsResetApiKeyStatus: 'elevenlabs:resetApiKeyStatus',
   elevenLabsTestApiKey: 'elevenlabs:testApiKey',
+  elevenLabsRevealApiKey: 'elevenlabs:revealApiKey',
   generateScript: 'openai:script',
   startGenerate: 'job:start',
   remuxProject: 'job:remux',

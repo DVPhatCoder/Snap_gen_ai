@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ProviderApiKeyPublic, ProviderApiKeyStatus } from '../../shared/provider-api-keys';
+import SecretInput from './SecretInput';
 
 const STATUS_LABEL: Record<ProviderApiKeyStatus, string> = {
   ready: 'Ready',
@@ -31,6 +32,8 @@ export default function ElevenLabsApiKeysPanel({
   const [editId, setEditId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [editName, setEditName] = useState('');
+  /** id → full key đã reveal (để hiện / copy). */
+  const [revealed, setRevealed] = useState<Record<string, string>>({});
 
   const refresh = async () => {
     const list = await window.studio.listElevenLabsApiKeys();
@@ -58,10 +61,36 @@ export default function ElevenLabsApiKeysPanel({
     }
   };
 
-  const copyMasked = async (masked: string) => {
+  const revealKey = async (id: string): Promise<string | null> => {
+    if (revealed[id]) return revealed[id];
     try {
-      await navigator.clipboard.writeText(masked);
-      setMsg({ type: 'ok', text: 'Đã copy (dạng đã che).' });
+      const plain = await window.studio.revealElevenLabsApiKey(id);
+      setRevealed((prev) => ({ ...prev, [id]: plain }));
+      return plain;
+    } catch (err) {
+      setMsg({ type: 'error', text: err instanceof Error ? err.message : String(err) });
+      return null;
+    }
+  };
+
+  const toggleReveal = async (id: string) => {
+    if (revealed[id]) {
+      setRevealed((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      return;
+    }
+    await revealKey(id);
+  };
+
+  const copyFull = async (id: string) => {
+    const plain = await revealKey(id);
+    if (!plain) return;
+    try {
+      await navigator.clipboard.writeText(plain);
+      setMsg({ type: 'ok', text: 'Đã copy full API key.' });
     } catch {
       setMsg({ type: 'error', text: 'Không copy được.' });
     }
@@ -91,13 +120,12 @@ export default function ElevenLabsApiKeysPanel({
           disabled={busy || disabled}
           onChange={(e) => setDraftName(e.target.value)}
         />
-        <input
-          type="password"
-          placeholder="Dán sk_… hoặc xi_… từ ngoài"
+        <SecretInput
           value={draftKey}
           disabled={busy || disabled}
-          onChange={(e) => setDraftKey(e.target.value)}
-          autoComplete="off"
+          placeholder="Dán sk_… hoặc xi_… từ ngoài"
+          onChange={setDraftKey}
+          aria-label="API key ElevenLabs"
         />
         <button
           type="button"
@@ -138,8 +166,8 @@ export default function ElevenLabsApiKeysPanel({
                     {key.isPrimary ? '● Primary · ' : ''}
                     {key.name || `Priority ${key.priority}`}
                   </strong>
-                  <p className="el-key-masked" title={key.maskedKey}>
-                    Key: {key.maskedKey}
+                  <p className="el-key-masked" title={revealed[key.id] || key.maskedKey}>
+                    Key: {revealed[key.id] || key.maskedKey}
                   </p>
                 </div>
                 <div className="el-key-badges">
@@ -158,13 +186,12 @@ export default function ElevenLabsApiKeysPanel({
                     placeholder="Tên"
                     disabled={busy}
                   />
-                  <input
-                    type="password"
+                  <SecretInput
                     value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
+                    onChange={setEditValue}
                     placeholder="API key mới (để trống nếu giữ nguyên)"
                     disabled={busy}
-                    autoComplete="off"
+                    aria-label="API key mới"
                   />
                   <button
                     type="button"
@@ -179,6 +206,11 @@ export default function ElevenLabsApiKeysPanel({
                         });
                         setEditId(null);
                         setEditValue('');
+                        setRevealed((prev) => {
+                          const next = { ...prev };
+                          delete next[key.id];
+                          return next;
+                        });
                         return list;
                       })
                     }
@@ -207,7 +239,17 @@ export default function ElevenLabsApiKeysPanel({
                     type="button"
                     className="btn ghost"
                     disabled={busy || disabled}
-                    onClick={() => void copyMasked(key.maskedKey)}
+                    onClick={() => void toggleReveal(key.id)}
+                    title={revealed[key.id] ? 'Ẩn key' : 'Hiện full key'}
+                  >
+                    {revealed[key.id] ? 'Ẩn' : 'Hiện'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={busy || disabled}
+                    onClick={() => void copyFull(key.id)}
+                    title="Copy full API key"
                   >
                     Copy
                   </button>
@@ -288,6 +330,11 @@ export default function ElevenLabsApiKeysPanel({
                     onClick={() =>
                       void run(async () => {
                         if (!window.confirm('Xóa API key này?')) return keys;
+                        setRevealed((prev) => {
+                          const next = { ...prev };
+                          delete next[key.id];
+                          return next;
+                        });
                         return window.studio.deleteElevenLabsApiKey(key.id);
                       })
                     }

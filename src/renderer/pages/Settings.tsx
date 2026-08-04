@@ -10,6 +10,7 @@ import { ELEVENLABS_TTS_MODELS, OPENAI_CHAT_MODELS, OPENAI_TTS_MODELS, OPENAI_TT
 import UsageQuotaPanel from '../components/UsageQuotaPanel';
 import UsageHistoryPanel from '../components/UsageHistoryPanel';
 import ElevenLabsApiKeysPanel from '../components/ElevenLabsApiKeysPanel';
+import SecretInput from '../components/SecretInput';
 
 export default function Settings() {
   const [keys, setKeys] = useState<ApiKeys>({
@@ -254,21 +255,19 @@ export default function Settings() {
         <h2>API Keys</h2>
         <div className="field">
           <label htmlFor="snapgen">Snapgen API Key</label>
-          <input
+          <SecretInput
             id="snapgen"
-            type="password"
             value={keys.snapgenApiKey}
-            onChange={(e) => setKeys({ ...keys, snapgenApiKey: e.target.value })}
+            onChange={(v) => setKeys({ ...keys, snapgenApiKey: v })}
             placeholder="sk_..."
           />
         </div>
         <div className="field">
           <label htmlFor="openai">OpenAI API Key</label>
-          <input
+          <SecretInput
             id="openai"
-            type="password"
             value={keys.openaiApiKey}
-            onChange={(e) => setKeys({ ...keys, openaiApiKey: e.target.value })}
+            onChange={(v) => setKeys({ ...keys, openaiApiKey: v })}
             placeholder="sk-..."
           />
           <p className="hint">Vẫn cần OpenAI để viết kịch bản (ChatGPT), kể cả khi voice dùng ElevenLabs.</p>

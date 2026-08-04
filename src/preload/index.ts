@@ -79,6 +79,8 @@ const api = {
     ipcRenderer.invoke(IPC.elevenLabsResetApiKeyStatus, id),
   testElevenLabsApiKey: (id: string): Promise<{ ok: boolean; message: string }> =>
     ipcRenderer.invoke(IPC.elevenLabsTestApiKey, id),
+  revealElevenLabsApiKey: (id: string): Promise<string> =>
+    ipcRenderer.invoke(IPC.elevenLabsRevealApiKey, id),
   getElevenLabsSession: (): Promise<ElevenLabsSessionStatus> =>
     ipcRenderer.invoke(IPC.elevenLabsGetSession),
   clearElevenLabsSession: (): Promise<ElevenLabsSessionStatus> =>

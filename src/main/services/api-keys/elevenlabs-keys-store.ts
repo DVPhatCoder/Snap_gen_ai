@@ -143,6 +143,13 @@ export function listElevenLabsKeysPublic(): ProviderApiKeyPublic[] {
   return records.map((r) => toPublicApiKey(r, primary));
 }
 
+/** Trả full API key theo id (để hiện/copy trong Settings). */
+export function getElevenLabsApiKeyPlain(id: string): string | null {
+  const record = loadElevenLabsKeyRecords().find((r) => r.id === id);
+  const key = record?.apiKey?.trim();
+  return key || null;
+}
+
 export function upsertElevenLabsKey(apiKey: string, name?: string): ProviderApiKeyRecord {
   const key = apiKey.trim();
   if (!/^(sk_|xi_)/i.test(key)) {

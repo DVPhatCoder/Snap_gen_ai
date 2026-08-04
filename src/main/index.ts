@@ -29,7 +29,7 @@ import {
 } from './services/elevenlabs-auth';
 import { listElevenLabsVoices, previewElevenLabsVoice, addElevenLabsLibraryVoice } from './services/elevenlabs-tts';
 import { ElevenLabsKeyManager } from './services/api-keys/elevenlabs-key-manager';
-import { listElevenLabsKeysPublic } from './services/api-keys/elevenlabs-keys-store';
+import { listElevenLabsKeysPublic, getElevenLabsApiKeyPlain } from './services/api-keys/elevenlabs-keys-store';
 import { getUsageSnapshot, getUsageHistory, loadMoreUsageHistory } from './services/usage';
 import {
   installLocalMediaProtocol,
@@ -146,6 +146,11 @@ function registerIpc(): void {
   ipcMain.handle(IPC.elevenLabsTestApiKey, async (_e, id: string) =>
     ElevenLabsKeyManager.testKey(id)
   );
+  ipcMain.handle(IPC.elevenLabsRevealApiKey, (_e, id: string) => {
+    const key = getElevenLabsApiKeyPlain(id);
+    if (!key) throw new Error('Không tìm thấy API key.');
+    return key;
+  });
   ipcMain.handle(IPC.elevenLabsGetSession, async () => getElevenLabsSessionStatus());
   ipcMain.handle(IPC.elevenLabsClearSession, async () => clearElevenLabsSession());
   let listVoicesInFlight: Promise<unknown> | null = null;
