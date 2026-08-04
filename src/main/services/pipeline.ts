@@ -1002,8 +1002,8 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
       phase: 'merge',
       message:
         mediaKind === 'image'
-          ? 'Đang ghép slideshow (GPU/CPU nhanh) + audio + subtitle...'
-          : 'Đang cắt ghép cảnh song song (GPU/CPU nhanh) + audio + subtitle...',
+          ? 'Đang ghép slideshow Ken Burns (giữ chất lượng, song song + GPU) + audio…'
+          : 'Đang chuẩn hóa/ghép cảnh song song (GPU NVENC nếu có) + audio…',
       percent: 92,
     });
 

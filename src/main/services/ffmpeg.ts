@@ -70,26 +70,55 @@ interface VideoEncoder {
   options: string[];
 }
 
-let cachedEncoder: VideoEncoder | null = null;
-let encoderProbe: Promise<VideoEncoder> | null = null;
+const encoderCache = new Map<'fast' | 'quality', VideoEncoder>();
+const encoderProbes = new Map<'fast' | 'quality', Promise<VideoEncoder>>();
 
-function cpuEncoder(): VideoEncoder {
+function cpuEncoder(profile: 'fast' | 'quality' = 'fast'): VideoEncoder {
+  if (profile === 'quality') {
+    // Gần setting cũ: medium/crf18 — dùng veryfast vẫn gần chất lượng, nhanh hơn medium
+    return {
+      kind: 'libx264',
+      options: ['-preset', 'veryfast', '-crf', '18', '-threads', '0', '-pix_fmt', 'yuv420p'],
+    };
+  }
   return {
     kind: 'libx264',
-    // ultrafast + threads = nhanh hơn rất nhiều so với veryfast/medium trên CPU
     options: ['-preset', 'ultrafast', '-crf', '23', '-threads', '0', '-pix_fmt', 'yuv420p'],
   };
 }
 
-async function tryGpuEncoder(kind: Exclude<VideoEncoderKind, 'libx264'>): Promise<boolean> {
-  const work = path.join(os.tmpdir(), `snapgen-enc-probe-${kind}-${process.pid}.mp4`);
+async function tryGpuEncoder(
+  kind: Exclude<VideoEncoderKind, 'libx264'>,
+  profile: 'fast' | 'quality'
+): Promise<boolean> {
+  const work = path.join(os.tmpdir(), `snapgen-enc-probe-${kind}-${profile}-${process.pid}.mp4`);
   try {
     const opts =
       kind === 'h264_nvenc'
-        ? ['-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '23', '-pix_fmt', 'yuv420p']
+        ? profile === 'quality'
+          ? ['-c:v', 'h264_nvenc', '-preset', 'p4', '-rc', 'vbr', '-cq', '18', '-b:v', '0', '-pix_fmt', 'yuv420p']
+          : ['-c:v', 'h264_nvenc', '-preset', 'p1', '-rc', 'vbr', '-cq', '26', '-b:v', '0', '-pix_fmt', 'yuv420p']
         : kind === 'h264_qsv'
-          ? ['-c:v', 'h264_qsv', '-global_quality', '23', '-pix_fmt', 'yuv420p']
-          : ['-c:v', 'h264_amf', '-quality', 'speed', '-rc', 'cqp', '-qp_i', '22', '-pix_fmt', 'yuv420p'];
+          ? [
+              '-c:v',
+              'h264_qsv',
+              '-global_quality',
+              profile === 'quality' ? '18' : '23',
+              '-pix_fmt',
+              'yuv420p',
+            ]
+          : [
+              '-c:v',
+              'h264_amf',
+              '-quality',
+              profile === 'quality' ? 'quality' : 'speed',
+              '-rc',
+              'cqp',
+              '-qp_i',
+              profile === 'quality' ? '18' : '22',
+              '-pix_fmt',
+              'yuv420p',
+            ];
     await run(
       ffmpeg()
         .input('color=c=black:s=160x90:d=0.2')
@@ -109,41 +138,66 @@ async function tryGpuEncoder(kind: Exclude<VideoEncoderKind, 'libx264'>): Promis
   }
 }
 
-/** Chọn encoder nhanh nhất máy hỗ trợ (GPU → CPU ultrafast). Cache 1 lần/process. */
-async function resolveVideoEncoder(): Promise<VideoEncoder> {
-  if (cachedEncoder) return cachedEncoder;
-  if (!encoderProbe) {
-    encoderProbe = (async () => {
+/**
+ * GPU nếu có.
+ * - quality: giữ gần CRF18 (slideshow Ken Burns)
+ * - fast: ưu tiên tốc độ (chuẩn hóa clip video)
+ */
+async function resolveVideoEncoder(profile: 'fast' | 'quality' = 'fast'): Promise<VideoEncoder> {
+  const hit = encoderCache.get(profile);
+  if (hit) return hit;
+  let probe = encoderProbes.get(profile);
+  if (!probe) {
+    probe = (async () => {
       const order: Array<Exclude<VideoEncoderKind, 'libx264'>> = [
         'h264_nvenc',
         'h264_qsv',
         'h264_amf',
       ];
       for (const kind of order) {
-        if (await tryGpuEncoder(kind)) {
+        if (await tryGpuEncoder(kind, profile)) {
           if (kind === 'h264_nvenc') {
             return {
               kind,
-              options: ['-preset', 'p4', '-cq', '23', '-pix_fmt', 'yuv420p'],
+              options:
+                profile === 'quality'
+                  ? ['-preset', 'p4', '-rc', 'vbr', '-cq', '18', '-b:v', '0', '-pix_fmt', 'yuv420p']
+                  : ['-preset', 'p1', '-rc', 'vbr', '-cq', '26', '-b:v', '0', '-pix_fmt', 'yuv420p'],
             };
           }
           if (kind === 'h264_qsv') {
             return {
               kind,
-              options: ['-global_quality', '23', '-pix_fmt', 'yuv420p'],
+              options: [
+                '-global_quality',
+                profile === 'quality' ? '18' : '23',
+                '-pix_fmt',
+                'yuv420p',
+              ],
             };
           }
           return {
             kind,
-            options: ['-quality', 'speed', '-rc', 'cqp', '-qp_i', '22', '-pix_fmt', 'yuv420p'],
+            options: [
+              '-quality',
+              profile === 'quality' ? 'quality' : 'speed',
+              '-rc',
+              'cqp',
+              '-qp_i',
+              profile === 'quality' ? '18' : '22',
+              '-pix_fmt',
+              'yuv420p',
+            ],
           };
         }
       }
-      return cpuEncoder();
+      return cpuEncoder(profile);
     })();
+    encoderProbes.set(profile, probe);
   }
-  cachedEncoder = await encoderProbe;
-  return cachedEncoder;
+  const resolved = await probe;
+  encoderCache.set(profile, resolved);
+  return resolved;
 }
 
 function applyVideoEncoder(
@@ -175,13 +229,20 @@ async function mapPool<T, R>(
   return results;
 }
 
-function encodeConcurrency(): number {
+function encodeConcurrency(encoder?: VideoEncoder): number {
   try {
     const cpus = os.cpus()?.length || 4;
-    return Math.max(2, Math.min(4, Math.floor(cpus / 2) || 2));
+    if (encoder?.kind === 'h264_nvenc') return Math.min(5, Math.max(3, clipBudget(cpus)));
+    if (encoder && encoder.kind !== 'libx264') return Math.min(4, Math.max(2, clipBudget(cpus)));
+    // CPU: nhiều process ultrafast song song
+    return Math.max(3, Math.min(8, cpus));
   } catch {
-    return 2;
+    return 3;
   }
+}
+
+function clipBudget(cpus: number): number {
+  return Math.floor(cpus / 2) || 2;
 }
 
 /** nano-banana / Gemini thường gắn sparkle logo góc dưới-phải. */
@@ -370,7 +431,7 @@ export async function concatClipFiles(
 
   fs.mkdirSync(workDir, { recursive: true });
   const encoder = await resolveVideoEncoder();
-  const normalized = await mapPool(clipPaths, encodeConcurrency(), async (clipPath, i) => {
+  const normalized = await mapPool(clipPaths, encodeConcurrency(encoder), async (clipPath, i) => {
     const out = path.join(workDir, `seg-${i}.mp4`);
     const cmd = ffmpeg(clipPath).videoFilters([
       'scale=1280:720:force_original_aspect_ratio=decrease',
@@ -416,51 +477,29 @@ export async function assembleFinalVideo(options: {
 
   fs.mkdirSync(workDir, { recursive: true });
   const encoder = await resolveVideoEncoder();
+  const workers = encodeConcurrency(encoder);
 
-  // Hard cuts between scenes — fit each clip to planned duration.
-  // Longer than natural: freeze last frame (tpad). Shorter: trim with -t.
-  // Encode song song (GPU/CPU) để rút ngắn thời gian merge.
-  const normalized = await mapPool(clipPaths, encodeConcurrency(), async (clipPath, i) => {
+  // Chuẩn hóa song song — tin duration_hint, không ffprobe từng clip (tiết kiệm rất nhiều thời gian).
+  const normalized = await mapPool(clipPaths, workers, async (clipPath, i) => {
     const out = path.join(workDir, `clip-${i}.mp4`);
+    const planned = Math.max(0.5, options.clipDurations?.[i] ?? 6);
+
     if (options.skipClipNormalize) {
-      const planned = options.clipDurations?.[i];
-      const natural = await getDurationSafe(clipPath, planned ?? 8);
-      if (planned == null || Math.abs(planned - natural) <= 0.08) {
-        fs.copyFileSync(clipPath, out);
-        return out;
-      }
-      // Duration mismatch: only trim/pad, do not re-scale (keeps Ken Burns smooth).
-      const filters: string[] = [];
-      if (planned > natural + 0.05) {
-        filters.push(`tpad=stop_mode=clone:stop_duration=${(planned - natural).toFixed(3)}`);
-      }
-      if (!filters.length) {
-        const cmd = ffmpeg(clipPath).outputOptions(['-an', '-c:v', 'copy']);
-        if (planned) cmd.outputOptions(['-t', String(planned)]);
-        await run(cmd.output(out));
-        return out;
-      }
-      const cmd = ffmpeg(clipPath).videoFilters(filters);
-      applyVideoEncoder(cmd, encoder, ['-an', '-r', '30']);
-      if (planned) cmd.outputOptions(['-t', String(planned)]);
-      await run(cmd.output(out));
+      // Slideshow đã encode đúng duration/720p → chỉ copy, không encode lại.
+      fs.copyFileSync(clipPath, out);
       return out;
     }
 
-    const natural = await getDurationSafe(clipPath, options.clipDurations?.[i] ?? 8);
-    const planned = options.clipDurations?.[i];
     const filters = [
-      'scale=1280:720:force_original_aspect_ratio=decrease',
+      'scale=1280:720:force_original_aspect_ratio=decrease:flags=fast_bilinear',
       'pad=1280:720:(ow-iw)/2:(oh-ih)/2:black',
       'fps=30',
+      // Pad đủ planned rồi -t cắt → khỏi đo duration thật
+      `tpad=stop_mode=clone:stop_duration=${planned.toFixed(3)}`,
     ];
-    if (planned != null && planned > natural + 0.05) {
-      filters.push(`tpad=stop_mode=clone:stop_duration=${(planned - natural).toFixed(3)}`);
-    }
 
     const cmd = ffmpeg(clipPath).videoFilters(filters);
-    applyVideoEncoder(cmd, encoder, ['-an', '-r', '30']);
-    if (planned) cmd.outputOptions(['-t', String(planned)]);
+    applyVideoEncoder(cmd, encoder, ['-an', '-r', '30', '-t', String(planned)]);
     await run(cmd.output(out));
     return out;
   });
@@ -483,14 +522,12 @@ export async function assembleFinalVideo(options: {
 
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 
-  // The narration is usually shorter than the footage. `-shortest` would cut the
-  // video down to the audio, dropping whole scenes, so instead pad the audio with
-  // silence and clamp the output to the full video length.
   const plannedTotal =
     options.estimatedTotalSeconds ??
     options.clipDurations?.reduce((sum, value) => sum + value, 0) ??
     0;
-  const videoDuration = await getDurationSafe(silentConcat, plannedTotal);
+  // Tin tổng planned — khỏi ffprobe file concat (nhanh hơn, đủ chính xác cho mux).
+  const videoDuration = plannedTotal > 0 ? plannedTotal : await getDurationSafe(silentConcat, 0);
   const lengthOptions = videoDuration > 0 ? ['-t', videoDuration.toFixed(3)] : ['-shortest'];
 
   if (burnSubtitles) {
@@ -522,14 +559,11 @@ export async function assembleFinalVideo(options: {
 }
 
 /**
- * Ken Burns — zoom-in only, smooth push-in then hold.
- * Target ~115% (within 110–120%). Ease-in-out so motion feels like a
- * gentle camera move, not a linear crawl. High-res source + zoompan to
- * 1080p then lanczos down to 720p reduces sub-pixel shake.
+ * Ken Burns chất lượng cũ: oversample 5K + zoompan 1080p @60 → 720p.
+ * Performance tăng ở lớp song song + GPU encode, không giảm filter này.
  */
 function kenBurnsFilters(durationSec: number): string[] {
-  // 30fps đủ mượt cho slideshow; bỏ oversample 5K → nhanh hơn rõ khi merge ảnh.
-  const renderFps = 30;
+  const renderFps = 60;
   const outFps = 30;
   const frames = Math.max(Math.round(durationSec * renderFps), renderFps);
   const last = Math.max(frames - 1, 1);
@@ -540,11 +574,12 @@ function kenBurnsFilters(durationSec: number): string[] {
   const zExpr = `1+${delta.toFixed(8)}*((${t})*(${t})*(3-2*(${t})))`;
 
   return [
-    'scale=2560:1440:force_original_aspect_ratio=increase:flags=bilinear',
-    'crop=2560:1440',
+    'scale=5120:2880:force_original_aspect_ratio=increase:flags=lanczos',
+    'crop=5120:2880',
     'setsar=1',
     'format=yuv420p',
-    `zoompan=z='${zExpr}':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1280x720:fps=${renderFps}`,
+    `zoompan=z='${zExpr}':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1920x1080:fps=${renderFps}`,
+    'scale=1280:720:flags=lanczos',
     `fps=${outFps}`,
   ];
 }
@@ -573,12 +608,19 @@ export async function assembleSlideshowFromImages(options: {
   if (!imagePaths.length) throw new Error('No images to assemble.');
 
   fs.mkdirSync(workDir, { recursive: true });
-  const estimatedTotal = durations?.reduce((sum, value) => sum + value, 0) || imagePaths.length * 5;
-  const audioDur = await getDurationSafe(audioPath, estimatedTotal);
-  const fallback = Math.max(audioDur / imagePaths.length, 1);
-  const encoder = await resolveVideoEncoder();
+  // Tin durations từ pipeline; chỉ probe audio khi thiếu duration từng scene.
+  const estimatedTotal = durations?.reduce((sum, value) => sum + value, 0) || 0;
+  let fallback = 5;
+  if (!durations?.length) {
+    const audioDur = await getDurationSafe(audioPath, imagePaths.length * 5);
+    fallback = Math.max(audioDur / imagePaths.length, 1);
+  }
+  const encoder = await resolveVideoEncoder('quality');
+  // Ken Burns chủ yếu tốn CPU (zoompan) — song song theo số core, GPU lo phần encode.
+  const workers = Math.max(2, Math.min(encoder.kind === 'libx264' ? 4 : 6, os.cpus()?.length || 4));
 
-  const clips = await mapPool(imagePaths, encodeConcurrency(), async (imagePath, i) => {
+  // Ảnh → clip Ken Burns chất lượng cũ, chạy song song để rút thời gian ghép.
+  const clips = await mapPool(imagePaths, workers, async (imagePath, i) => {
     if (!fs.existsSync(imagePath)) {
       throw new Error(`Thiếu ảnh scene ${i + 1}: ${imagePath}`);
     }
@@ -590,7 +632,7 @@ export async function assembleSlideshowFromImages(options: {
     const outFrames = Math.max(Math.round(dur * 30), 30);
     try {
       const cmd = ffmpeg(imagePath)
-        .inputOptions(['-loop', '1', '-framerate', '30'])
+        .inputOptions(['-loop', '1', '-framerate', '60'])
         .videoFilters(kenBurnsFilters(dur));
       applyVideoEncoder(cmd, encoder, [
         '-frames:v',
@@ -609,6 +651,10 @@ export async function assembleSlideshowFromImages(options: {
     return out;
   });
 
+  const totalSec =
+    estimatedTotal ||
+    clips.length * fallback;
+
   // Write to a temp file then rename so the UI never opens a half-written final.mp4.
   const tempOutput = path.join(workDir, `final-build-${Date.now()}.mp4`);
   await assembleFinalVideo({
@@ -618,8 +664,8 @@ export async function assembleSlideshowFromImages(options: {
     outputPath: tempOutput,
     burnSubtitles,
     workDir,
-    estimatedTotalSeconds: estimatedTotal,
-    clipDurations: durations,
+    estimatedTotalSeconds: totalSec,
+    clipDurations: durations?.length ? durations : clips.map(() => fallback),
     skipClipNormalize: true,
   });
 
