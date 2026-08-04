@@ -10,9 +10,10 @@ export default defineConfig({
   build: {
     rollupOptions: {
       external: [
+        // Pure JS → bundle vào main.js (tránh thiếu node_modules khi package)
+        // Binary / native → external + giữ trong forge.config ignore whitelist
         'ffmpeg-static',
         'ffprobe-static',
-        'fluent-ffmpeg',
         'electron',
         'sharp',
         '@pilio/gemini-watermark-remover',
