@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import ffmpeg from 'fluent-ffmpeg';
@@ -59,6 +60,128 @@ function run(cmd: ffmpeg.FfmpegCommand): Promise<void> {
       })
       .run();
   });
+}
+
+type VideoEncoderKind = 'h264_nvenc' | 'h264_qsv' | 'h264_amf' | 'libx264';
+
+interface VideoEncoder {
+  kind: VideoEncoderKind;
+  /** Options sau `-c:v` (không gồm chính codec name). */
+  options: string[];
+}
+
+let cachedEncoder: VideoEncoder | null = null;
+let encoderProbe: Promise<VideoEncoder> | null = null;
+
+function cpuEncoder(): VideoEncoder {
+  return {
+    kind: 'libx264',
+    // ultrafast + threads = nhanh hơn rất nhiều so với veryfast/medium trên CPU
+    options: ['-preset', 'ultrafast', '-crf', '23', '-threads', '0', '-pix_fmt', 'yuv420p'],
+  };
+}
+
+async function tryGpuEncoder(kind: Exclude<VideoEncoderKind, 'libx264'>): Promise<boolean> {
+  const work = path.join(os.tmpdir(), `snapgen-enc-probe-${kind}-${process.pid}.mp4`);
+  try {
+    const opts =
+      kind === 'h264_nvenc'
+        ? ['-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '23', '-pix_fmt', 'yuv420p']
+        : kind === 'h264_qsv'
+          ? ['-c:v', 'h264_qsv', '-global_quality', '23', '-pix_fmt', 'yuv420p']
+          : ['-c:v', 'h264_amf', '-quality', 'speed', '-rc', 'cqp', '-qp_i', '22', '-pix_fmt', 'yuv420p'];
+    await run(
+      ffmpeg()
+        .input('color=c=black:s=160x90:d=0.2')
+        .inputOptions(['-f', 'lavfi'])
+        .outputOptions([...opts, '-an', '-t', '0.2', '-y'])
+        .output(work)
+    );
+    return true;
+  } catch {
+    return false;
+  } finally {
+    try {
+      if (fs.existsSync(work)) fs.unlinkSync(work);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** Chọn encoder nhanh nhất máy hỗ trợ (GPU → CPU ultrafast). Cache 1 lần/process. */
+async function resolveVideoEncoder(): Promise<VideoEncoder> {
+  if (cachedEncoder) return cachedEncoder;
+  if (!encoderProbe) {
+    encoderProbe = (async () => {
+      const order: Array<Exclude<VideoEncoderKind, 'libx264'>> = [
+        'h264_nvenc',
+        'h264_qsv',
+        'h264_amf',
+      ];
+      for (const kind of order) {
+        if (await tryGpuEncoder(kind)) {
+          if (kind === 'h264_nvenc') {
+            return {
+              kind,
+              options: ['-preset', 'p4', '-cq', '23', '-pix_fmt', 'yuv420p'],
+            };
+          }
+          if (kind === 'h264_qsv') {
+            return {
+              kind,
+              options: ['-global_quality', '23', '-pix_fmt', 'yuv420p'],
+            };
+          }
+          return {
+            kind,
+            options: ['-quality', 'speed', '-rc', 'cqp', '-qp_i', '22', '-pix_fmt', 'yuv420p'],
+          };
+        }
+      }
+      return cpuEncoder();
+    })();
+  }
+  cachedEncoder = await encoderProbe;
+  return cachedEncoder;
+}
+
+function applyVideoEncoder(
+  cmd: ffmpeg.FfmpegCommand,
+  encoder: VideoEncoder,
+  extra: string[] = []
+): ffmpeg.FfmpegCommand {
+  return cmd.outputOptions(['-c:v', encoder.kind, ...encoder.options, ...extra]);
+}
+
+/** Chạy tối đa `concurrency` task song song (giữ thứ tự kết quả). */
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const n = Math.max(1, Math.min(concurrency, items.length || 1));
+  await Promise.all(
+    Array.from({ length: n }, async () => {
+      for (;;) {
+        const i = next++;
+        if (i >= items.length) return;
+        results[i] = await worker(items[i], i);
+      }
+    })
+  );
+  return results;
+}
+
+function encodeConcurrency(): number {
+  try {
+    const cpus = os.cpus()?.length || 4;
+    return Math.max(2, Math.min(4, Math.floor(cpus / 2) || 2));
+  } catch {
+    return 2;
+  }
 }
 
 /** nano-banana / Gemini thường gắn sparkle logo góc dưới-phải. */
@@ -246,21 +369,18 @@ export async function concatClipFiles(
   }
 
   fs.mkdirSync(workDir, { recursive: true });
-  const normalized: string[] = [];
-  for (let i = 0; i < clipPaths.length; i++) {
+  const encoder = await resolveVideoEncoder();
+  const normalized = await mapPool(clipPaths, encodeConcurrency(), async (clipPath, i) => {
     const out = path.join(workDir, `seg-${i}.mp4`);
-    await run(
-      ffmpeg(clipPaths[i])
-        .videoFilters([
-          'scale=1280:720:force_original_aspect_ratio=decrease',
-          'pad=1280:720:(ow-iw)/2:(oh-ih)/2:black',
-          'fps=30',
-        ])
-        .outputOptions(['-an', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-r', '30'])
-        .output(out)
-    );
-    normalized.push(out);
-  }
+    const cmd = ffmpeg(clipPath).videoFilters([
+      'scale=1280:720:force_original_aspect_ratio=decrease',
+      'pad=1280:720:(ow-iw)/2:(oh-ih)/2:black',
+      'fps=30',
+    ]);
+    applyVideoEncoder(cmd, encoder, ['-an', '-r', '30']);
+    await run(cmd.output(out));
+    return out;
+  });
 
   const listFile = path.join(workDir, 'seg-concat.txt');
   fs.writeFileSync(
@@ -295,39 +415,39 @@ export async function assembleFinalVideo(options: {
   if (!clipPaths.length) throw new Error('No clips to assemble.');
 
   fs.mkdirSync(workDir, { recursive: true });
+  const encoder = await resolveVideoEncoder();
 
   // Hard cuts between scenes — fit each clip to planned duration.
   // Longer than natural: freeze last frame (tpad). Shorter: trim with -t.
-  const normalized: string[] = [];
-  for (let i = 0; i < clipPaths.length; i++) {
+  // Encode song song (GPU/CPU) để rút ngắn thời gian merge.
+  const normalized = await mapPool(clipPaths, encodeConcurrency(), async (clipPath, i) => {
     const out = path.join(workDir, `clip-${i}.mp4`);
     if (options.skipClipNormalize) {
       const planned = options.clipDurations?.[i];
-      const natural = await getDurationSafe(clipPaths[i], planned ?? 8);
+      const natural = await getDurationSafe(clipPath, planned ?? 8);
       if (planned == null || Math.abs(planned - natural) <= 0.08) {
-        fs.copyFileSync(clipPaths[i], out);
-        normalized.push(out);
-        continue;
+        fs.copyFileSync(clipPath, out);
+        return out;
       }
       // Duration mismatch: only trim/pad, do not re-scale (keeps Ken Burns smooth).
       const filters: string[] = [];
       if (planned > natural + 0.05) {
         filters.push(`tpad=stop_mode=clone:stop_duration=${(planned - natural).toFixed(3)}`);
       }
-      const cmd = ffmpeg(clipPaths[i]).outputOptions([
-        '-an',
-        '-c:v',
-        filters.length ? 'libx264' : 'copy',
-        ...(filters.length ? ['-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', '-r', '30'] : []),
-      ]);
-      if (filters.length) cmd.videoFilters(filters);
+      if (!filters.length) {
+        const cmd = ffmpeg(clipPath).outputOptions(['-an', '-c:v', 'copy']);
+        if (planned) cmd.outputOptions(['-t', String(planned)]);
+        await run(cmd.output(out));
+        return out;
+      }
+      const cmd = ffmpeg(clipPath).videoFilters(filters);
+      applyVideoEncoder(cmd, encoder, ['-an', '-r', '30']);
       if (planned) cmd.outputOptions(['-t', String(planned)]);
       await run(cmd.output(out));
-      normalized.push(out);
-      continue;
+      return out;
     }
 
-    const natural = await getDurationSafe(clipPaths[i], options.clipDurations?.[i] ?? 8);
+    const natural = await getDurationSafe(clipPath, options.clipDurations?.[i] ?? 8);
     const planned = options.clipDurations?.[i];
     const filters = [
       'scale=1280:720:force_original_aspect_ratio=decrease',
@@ -338,21 +458,12 @@ export async function assembleFinalVideo(options: {
       filters.push(`tpad=stop_mode=clone:stop_duration=${(planned - natural).toFixed(3)}`);
     }
 
-    const cmd = ffmpeg(clipPaths[i]).videoFilters(filters).outputOptions([
-      '-an',
-      '-c:v',
-      'libx264',
-      '-preset',
-      'veryfast',
-      '-pix_fmt',
-      'yuv420p',
-      '-r',
-      '30',
-    ]);
+    const cmd = ffmpeg(clipPath).videoFilters(filters);
+    applyVideoEncoder(cmd, encoder, ['-an', '-r', '30']);
     if (planned) cmd.outputOptions(['-t', String(planned)]);
     await run(cmd.output(out));
-    normalized.push(out);
-  }
+    return out;
+  });
 
   const listFile = path.join(workDir, 'concat.txt');
   fs.writeFileSync(
@@ -384,25 +495,13 @@ export async function assembleFinalVideo(options: {
 
   if (burnSubtitles) {
     const srtEscaped = srtPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
-    await run(
-      ffmpeg()
-        .input(silentConcat)
-        .input(audioPath)
-        .videoFilters(`subtitles='${srtEscaped}'`)
-        .audioFilters('apad')
-        .outputOptions([
-          '-c:v',
-          'libx264',
-          '-preset',
-          'veryfast',
-          '-c:a',
-          'aac',
-          '-pix_fmt',
-          'yuv420p',
-          ...lengthOptions,
-        ])
-        .output(outputPath)
-    );
+    const cmd = ffmpeg()
+      .input(silentConcat)
+      .input(audioPath)
+      .videoFilters(`subtitles='${srtEscaped}'`)
+      .audioFilters('apad');
+    applyVideoEncoder(cmd, encoder, ['-c:a', 'aac', ...lengthOptions]);
+    await run(cmd.output(outputPath));
   } else {
     await run(
       ffmpeg()
@@ -429,31 +528,23 @@ export async function assembleFinalVideo(options: {
  * 1080p then lanczos down to 720p reduces sub-pixel shake.
  */
 function kenBurnsFilters(durationSec: number): string[] {
-  const renderFps = 60;
+  // 30fps đủ mượt cho slideshow; bỏ oversample 5K → nhanh hơn rõ khi merge ảnh.
+  const renderFps = 30;
   const outFps = 30;
   const frames = Math.max(Math.round(durationSec * renderFps), renderFps);
   const last = Math.max(frames - 1, 1);
-  // 115% final scale — enough “push in”, stops instead of zooming forever.
   const zMax = 1.15;
   const delta = zMax - 1;
 
-  // Smoothstep ease-in-out: t²(3−2t), t = clamp(on/last, 0..1)
-  // Commas must be escaped for filtergraph.
   const t = `min(1\\,on/${last})`;
   const zExpr = `1+${delta.toFixed(8)}*((${t})*(${t})*(3-2*(${t})))`;
 
-  // Watermark strip is done separately (stripNanoBananaWatermark) — do NOT
-  // put delogo in this chain: expression-based delogo often fails with
-  // Windows exit 4294967274 (-22 EINVAL) and frame=0 before any output.
   return [
-    // Oversample so each zoom step is a tiny fraction of a 720p pixel.
-    'scale=5120:2880:force_original_aspect_ratio=increase:flags=lanczos',
-    'crop=5120:2880',
+    'scale=2560:1440:force_original_aspect_ratio=increase:flags=bilinear',
+    'crop=2560:1440',
     'setsar=1',
     'format=yuv420p',
-    // Keep float x/y (no trunc) — trunc caused 1px “jumps” that looked shaky.
-    `zoompan=z='${zExpr}':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1920x1080:fps=${renderFps}`,
-    'scale=1280:720:flags=lanczos',
+    `zoompan=z='${zExpr}':d=${frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1280x720:fps=${renderFps}`,
     `fps=${outFps}`,
   ];
 }
@@ -485,10 +576,9 @@ export async function assembleSlideshowFromImages(options: {
   const estimatedTotal = durations?.reduce((sum, value) => sum + value, 0) || imagePaths.length * 5;
   const audioDur = await getDurationSafe(audioPath, estimatedTotal);
   const fallback = Math.max(audioDur / imagePaths.length, 1);
+  const encoder = await resolveVideoEncoder();
 
-  const clips: string[] = [];
-  for (let i = 0; i < imagePaths.length; i++) {
-    const imagePath = imagePaths[i];
+  const clips = await mapPool(imagePaths, encodeConcurrency(), async (imagePath, i) => {
     if (!fs.existsSync(imagePath)) {
       throw new Error(`Thiếu ảnh scene ${i + 1}: ${imagePath}`);
     }
@@ -499,35 +589,25 @@ export async function assembleSlideshowFromImages(options: {
     const dur = Math.max(durations?.[i] ?? fallback, 1);
     const outFrames = Math.max(Math.round(dur * 30), 30);
     try {
-      await run(
-        ffmpeg(imagePath)
-          .inputOptions(['-loop', '1', '-framerate', '60'])
-          .videoFilters(kenBurnsFilters(dur))
-          .outputOptions([
-            '-frames:v',
-            String(outFrames),
-            '-an',
-            '-c:v',
-            'libx264',
-            '-preset',
-            'medium',
-            '-crf',
-            '18',
-            '-pix_fmt',
-            'yuv420p',
-            '-r',
-            '30',
-          ])
-          .output(out)
-      );
+      const cmd = ffmpeg(imagePath)
+        .inputOptions(['-loop', '1', '-framerate', '30'])
+        .videoFilters(kenBurnsFilters(dur));
+      applyVideoEncoder(cmd, encoder, [
+        '-frames:v',
+        String(outFrames),
+        '-an',
+        '-r',
+        '30',
+      ]);
+      await run(cmd.output(out));
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       throw new Error(
         `FFmpeg lỗi khi tạo clip ảnh scene ${i + 1} (${path.basename(imagePath)}): ${detail}`
       );
     }
-    clips.push(out);
-  }
+    return out;
+  });
 
   // Write to a temp file then rename so the UI never opens a half-written final.mp4.
   const tempOutput = path.join(workDir, `final-build-${Date.now()}.mp4`);
