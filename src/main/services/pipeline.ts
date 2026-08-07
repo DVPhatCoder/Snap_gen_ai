@@ -12,12 +12,14 @@ import {
   MAX_TTS_FIT_ATTEMPTS,
 } from '../../shared/models';
 import type {
+  DashScopeRegion,
   GenerateJobInput,
   GenerateJobResult,
   JobProgress,
   MediaKind,
   SceneJobProgress,
   ScriptDraft,
+  TtsProvider,
 } from '../../shared/types';
 import { getKeys, getSettings } from '../store';
 import {
@@ -39,6 +41,13 @@ import {
 } from './openai-audio';
 import { synthesizeWithElevenLabs, resolveElevenLabsLanguageCode, resolveElevenLabsModelForLanguage } from './elevenlabs-tts';
 import { getElevenLabsSessionStatus, hasElevenLabsApiAccess } from './elevenlabs-auth';
+import { synthesizeContinuousNarrationWithQwen } from './qwen-tts';
+
+function ttsProviderLabel(provider: TtsProvider): string {
+  if (provider === 'elevenlabs') return 'ElevenLabs';
+  if (provider === 'qwen') return 'Qwen TTS';
+  return 'OpenAI TTS';
+}
 import {
   assembleFinalVideo,
   assembleSlideshowFromImages,
@@ -158,12 +167,17 @@ async function prepareNarration(options: {
   ttsModel: string;
   language?: string;
   refresh: boolean;
-  ttsProvider: 'openai' | 'elevenlabs';
+  ttsProvider: TtsProvider;
   elevenLabsVoiceId?: string;
   elevenLabsModelId?: string;
   elevenLabsPublicOwnerId?: string;
   elevenLabsOriginalVoiceId?: string;
   elevenLabsVoiceName?: string;
+  dashscopeApiKey?: string;
+  qwenTtsVoice?: string;
+  qwenTtsModel?: string;
+  qwenTtsInstructions?: string;
+  dashscopeRegion?: DashScopeRegion;
   /** Khớp video theo độ dài speech thật (sau khi audio đã đạt ±3% mục tiêu). */
   syncToSpeech?: boolean;
 }): Promise<NarrationBundle> {
@@ -181,7 +195,9 @@ async function prepareNarration(options: {
   const voiceKey =
     options.ttsProvider === 'elevenlabs'
       ? `elevenlabs:${options.elevenLabsVoiceId || ''}:${resolvedElModel}:${languageCode || ''}`
-      : `openai:${voice}:${ttsModel}`;
+      : options.ttsProvider === 'qwen'
+        ? `qwen:${options.qwenTtsVoice || ''}:${options.qwenTtsModel || ''}:${options.dashscopeRegion || 'intl'}`
+        : `openai:${voice}:${ttsModel}`;
   const hash = narrationHash(text, voiceKey, options.ttsProvider);
   const rawPath = path.join(projectDir, RAW_NARRATION_FILE);
   const audioPath = path.join(projectDir, 'narration.mp3');
@@ -217,6 +233,26 @@ async function prepareNarration(options: {
     if (synthesized.srtPath !== srtPath && fs.existsSync(synthesized.srtPath)) {
       fs.copyFileSync(synthesized.srtPath, srtPath);
     }
+    rawAudioDuration = await getDurationSafe(synthesized.audioPath, 0);
+    timings = computeSceneTimings({ scenes, words: synthesized.words, audioDuration: rawAudioDuration });
+    fs.writeFileSync(
+      path.join(projectDir, TIMING_FILE),
+      JSON.stringify({ hash, audioDuration: rawAudioDuration, timings } satisfies NarrationCache, null, 2),
+      'utf8'
+    );
+  } else if (options.ttsProvider === 'qwen') {
+    const synthesized = await synthesizeContinuousNarrationWithQwen({
+      dashscopeApiKey: options.dashscopeApiKey || '',
+      openaiApiKey: apiKey,
+      scenes,
+      voice: options.qwenTtsVoice || 'Cherry',
+      model: options.qwenTtsModel || 'qwen3-tts-flash',
+      language: options.language,
+      instructions: options.qwenTtsInstructions,
+      region: options.dashscopeRegion,
+      outDir: projectDir,
+      fileName: RAW_NARRATION_FILE,
+    });
     rawAudioDuration = await getDurationSafe(synthesized.audioPath, 0);
     timings = computeSceneTimings({ scenes, words: synthesized.words, audioDuration: rawAudioDuration });
     fs.writeFileSync(
@@ -312,12 +348,17 @@ async function prepareNarrationFittingTarget(options: {
   voice: string;
   ttsModel: string;
   language?: string;
-  ttsProvider: 'openai' | 'elevenlabs';
+  ttsProvider: TtsProvider;
   elevenLabsVoiceId?: string;
   elevenLabsModelId?: string;
   elevenLabsPublicOwnerId?: string;
   elevenLabsOriginalVoiceId?: string;
   elevenLabsVoiceName?: string;
+  dashscopeApiKey?: string;
+  qwenTtsVoice?: string;
+  qwenTtsModel?: string;
+  qwenTtsInstructions?: string;
+  dashscopeRegion?: DashScopeRegion;
   targetDurationSec: number;
 }): Promise<NarrationBundle> {
   const target = Math.max(1, options.targetDurationSec);
@@ -327,7 +368,7 @@ async function prepareNarrationFittingTarget(options: {
 
   for (let attempt = 1; attempt <= MAX_TTS_FIT_ATTEMPTS; attempt++) {
     const est = estimateScriptSpokenSeconds(script.scenes);
-    const ttsLabel = options.ttsProvider === 'elevenlabs' ? 'ElevenLabs' : 'OpenAI TTS';
+    const ttsLabel = ttsProviderLabel(options.ttsProvider);
     emitProgress({
       phase: 'tts',
       message: `TTS lần ${attempt}/${MAX_TTS_FIT_ATTEMPTS} (${ttsLabel}): ước lượng ~${formatDurationLabel(est)} → mục tiêu ${formatDurationLabel(target)}...`,
@@ -355,6 +396,11 @@ async function prepareNarrationFittingTarget(options: {
       elevenLabsPublicOwnerId: options.elevenLabsPublicOwnerId,
       elevenLabsOriginalVoiceId: options.elevenLabsOriginalVoiceId,
       elevenLabsVoiceName: options.elevenLabsVoiceName,
+      dashscopeApiKey: options.dashscopeApiKey,
+      qwenTtsVoice: options.qwenTtsVoice,
+      qwenTtsModel: options.qwenTtsModel,
+      qwenTtsInstructions: options.qwenTtsInstructions,
+      dashscopeRegion: options.dashscopeRegion,
       syncToSpeech: false,
     });
 
@@ -393,6 +439,11 @@ async function prepareNarrationFittingTarget(options: {
         elevenLabsPublicOwnerId: options.elevenLabsPublicOwnerId,
         elevenLabsOriginalVoiceId: options.elevenLabsOriginalVoiceId,
         elevenLabsVoiceName: options.elevenLabsVoiceName,
+        dashscopeApiKey: options.dashscopeApiKey,
+        qwenTtsVoice: options.qwenTtsVoice,
+        qwenTtsModel: options.qwenTtsModel,
+        qwenTtsInstructions: options.qwenTtsInstructions,
+        dashscopeRegion: options.dashscopeRegion,
         syncToSpeech: true,
       });
       emitProgress({
@@ -564,6 +615,9 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
   if (voice.ttsProvider === 'openai' && !keys.openaiApiKey) {
     throw new Error('Thiếu OpenAI API key. Vào Settings để cấu hình.');
   }
+  if (voice.ttsProvider === 'qwen' && !keys.dashscopeApiKey) {
+    throw new Error('Thiếu DashScope API key (Qwen TTS). Vào Settings để cấu hình.');
+  }
   if (voice.ttsProvider === 'elevenlabs') {
     if (!hasElevenLabsApiAccess()) {
       const el = await getElevenLabsSessionStatus();
@@ -638,7 +692,7 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
       assertScenesNarrationFillDuration(input.script.scenes);
     }
 
-    const ttsLabel = voice.ttsProvider === 'elevenlabs' ? 'ElevenLabs' : 'OpenAI TTS';
+    const ttsLabel = ttsProviderLabel(voice.ttsProvider);
     emitProgress({
       phase: 'tts',
       message: refreshNarration
@@ -666,6 +720,11 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
           elevenLabsPublicOwnerId: voice.elevenLabsPublicOwnerId,
           elevenLabsOriginalVoiceId: voice.elevenLabsOriginalVoiceId,
           elevenLabsVoiceName: voice.elevenLabsVoiceName,
+          dashscopeApiKey: keys.dashscopeApiKey,
+          qwenTtsVoice: voice.qwenTtsVoice,
+          qwenTtsModel: voice.qwenTtsModel,
+          qwenTtsInstructions: voice.qwenTtsInstructions,
+          dashscopeRegion: settings.dashscopeRegion,
           targetDurationSec: targetRuntimeSec,
         })
       : await prepareNarration({
@@ -683,6 +742,11 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
           elevenLabsPublicOwnerId: voice.elevenLabsPublicOwnerId,
           elevenLabsOriginalVoiceId: voice.elevenLabsOriginalVoiceId,
           elevenLabsVoiceName: voice.elevenLabsVoiceName,
+          dashscopeApiKey: keys.dashscopeApiKey,
+          qwenTtsVoice: voice.qwenTtsVoice,
+          qwenTtsModel: voice.qwenTtsModel,
+          qwenTtsInstructions: voice.qwenTtsInstructions,
+          dashscopeRegion: settings.dashscopeRegion,
           syncToSpeech: true,
         });
     const audioPath = narration.audioPath;
@@ -719,7 +783,9 @@ export async function runGenerateJob(input: GenerateJobInput): Promise<GenerateJ
         `Voiceover ${formatDurationLabel(narration.rawAudioDuration)} (mục tiêu ${formatDurationLabel(targetRuntimeSec)}) — ` +
         (voice.ttsProvider === 'elevenlabs'
           ? `khớp ${script.scenes.length} scene theo timestamp ElevenLabs.`
-          : `khớp ${script.scenes.length} scene theo timestamp Whisper.`),
+          : voice.ttsProvider === 'qwen'
+            ? `khớp ${script.scenes.length} scene theo Qwen TTS (+ Whisper nếu có OpenAI key).`
+            : `khớp ${script.scenes.length} scene theo timestamp Whisper.`),
       percent: 12,
     });
 

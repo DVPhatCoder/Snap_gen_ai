@@ -28,6 +28,7 @@ import Timeline from '../components/Timeline';
 import ExportDialog, { buildExportableScenes } from '../components/ExportDialog';
 import GenerateScenesDialog from '../components/GenerateScenesDialog';
 import ProjectVoicePanel from '../components/ProjectVoicePanel';
+import NarrationTranscriptPanel from '../components/NarrationTranscriptPanel';
 import type { ProjectVoiceSettings } from '../../shared/types';
 import { OPENAI_CHAT_MODELS } from '../../shared/types';
 import { DEFAULT_PROJECT_VOICE, resolveProjectChatModel, resolveProjectVoice } from '../../shared/voice';
@@ -1302,6 +1303,11 @@ export default function Studio({ projectId, onProjectReady, onNeedProject }: Pro
             Mỗi dự án có giọng riêng — lưu trong draft, không dùng chung Settings toàn app.
           </p>
           <ProjectVoicePanel value={voice} disabled={busy} onChange={onVoiceChange} />
+          <NarrationTranscriptPanel
+            scenes={script?.scenes}
+            language={language}
+            disabled={busy}
+          />
           {result?.audioPath ? (
             <button
               type="button"

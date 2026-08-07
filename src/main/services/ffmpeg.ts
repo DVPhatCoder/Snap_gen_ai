@@ -418,6 +418,58 @@ export async function buildNarrationTrack(options: {
   return outputPath;
 }
 
+/** Nối nhiều file audio (wav/mp3…) thành một mp3 mono 44.1kHz. */
+export async function concatAudioFiles(
+  inputPaths: string[],
+  outputPath: string,
+  workDir: string
+): Promise<string> {
+  if (!inputPaths.length) throw new Error('No audio files to concat.');
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.mkdirSync(workDir, { recursive: true });
+
+  if (inputPaths.length === 1) {
+    const src = inputPaths[0];
+    if (src.toLowerCase().endsWith('.mp3') && path.resolve(src) === path.resolve(outputPath)) {
+      return outputPath;
+    }
+    await run(
+      ffmpeg()
+        .input(src)
+        .outputOptions(['-c:a', 'libmp3lame', '-q:a', '4', '-ar', '44100', '-ac', '1'])
+        .output(outputPath)
+    );
+    return outputPath;
+  }
+
+  const normalized: string[] = [];
+  for (let i = 0; i < inputPaths.length; i++) {
+    const out = path.join(workDir, `audio-norm-${String(i).padStart(3, '0')}.mp3`);
+    await run(
+      ffmpeg()
+        .input(inputPaths[i])
+        .outputOptions(['-c:a', 'libmp3lame', '-q:a', '4', '-ar', '44100', '-ac', '1'])
+        .output(out)
+    );
+    normalized.push(out);
+  }
+
+  const listFile = path.join(workDir, 'audio-concat.txt');
+  fs.writeFileSync(
+    listFile,
+    normalized.map((p) => `file '${p.replace(/\\/g, '/')}'`).join('\n'),
+    'utf8'
+  );
+  await run(
+    ffmpeg()
+      .input(listFile)
+      .inputOptions(['-f', 'concat', '-safe', '0'])
+      .outputOptions(['-c', 'copy'])
+      .output(outputPath)
+  );
+  return outputPath;
+}
+
 export async function concatClipFiles(
   clipPaths: string[],
   outputPath: string,

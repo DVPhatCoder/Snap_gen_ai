@@ -2,10 +2,12 @@ import { app, safeStorage } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ApiKeys, AppSettings } from '../shared/types';
+import { isDashScopeRegion, isTtsProvider } from '../shared/voice';
 
 const DEFAULT_KEYS: ApiKeys = {
   snapgenApiKey: '',
   openaiApiKey: '',
+  dashscopeApiKey: '',
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -15,6 +17,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   ttsProvider: 'openai',
   elevenLabsVoiceId: '21m00Tcm4TlvDq8ikWAM',
   elevenLabsModelId: 'eleven_flash_v2_5',
+  qwenTtsModel: 'qwen3-tts-flash',
+  qwenTtsVoice: 'Cherry',
+  qwenTtsInstructions: '',
+  dashscopeRegion: 'intl',
   burnSubtitles: false,
   maxConcurrentScenes: 5,
 };
@@ -92,6 +98,7 @@ export function getKeys(): ApiKeys {
       return {
         snapgenApiKey: parsed.snapgenApiKey ?? '',
         openaiApiKey: parsed.openaiApiKey ?? '',
+        dashscopeApiKey: parsed.dashscopeApiKey ?? '',
       };
     } catch {
       return { ...DEFAULT_KEYS };
@@ -101,6 +108,7 @@ export function getKeys(): ApiKeys {
   return {
     snapgenApiKey: plain.snapgenApiKey ?? '',
     openaiApiKey: plain.openaiApiKey ?? '',
+    dashscopeApiKey: plain.dashscopeApiKey ?? '',
   };
 }
 
@@ -109,6 +117,7 @@ export function saveKeys(keys: ApiKeys): void {
   const clean: ApiKeys = {
     snapgenApiKey: keys.snapgenApiKey,
     openaiApiKey: keys.openaiApiKey,
+    dashscopeApiKey: keys.dashscopeApiKey ?? '',
   };
   if (safeStorage.isEncryptionAvailable()) {
     const enc = safeStorage.encryptString(JSON.stringify(clean)).toString('base64');
@@ -124,10 +133,9 @@ export function saveKeys(keys: ApiKeys): void {
 export function getSettings(): AppSettings {
   const data = readFile();
   const merged = { ...DEFAULT_SETTINGS, ...data.settings };
-  const provider =
-    merged.ttsProvider === 'elevenlabs' || merged.ttsProvider === 'openai'
-      ? merged.ttsProvider
-      : DEFAULT_SETTINGS.ttsProvider;
+  const provider = isTtsProvider(merged.ttsProvider)
+    ? merged.ttsProvider
+    : DEFAULT_SETTINGS.ttsProvider;
   return {
     openaiModel: merged.openaiModel || DEFAULT_SETTINGS.openaiModel,
     openaiTtsModel: merged.openaiTtsModel || DEFAULT_SETTINGS.openaiTtsModel,
@@ -135,6 +143,12 @@ export function getSettings(): AppSettings {
     ttsProvider: provider,
     elevenLabsVoiceId: merged.elevenLabsVoiceId || DEFAULT_SETTINGS.elevenLabsVoiceId,
     elevenLabsModelId: merged.elevenLabsModelId || DEFAULT_SETTINGS.elevenLabsModelId,
+    qwenTtsModel: merged.qwenTtsModel || DEFAULT_SETTINGS.qwenTtsModel,
+    qwenTtsVoice: merged.qwenTtsVoice || DEFAULT_SETTINGS.qwenTtsVoice,
+    qwenTtsInstructions: merged.qwenTtsInstructions ?? '',
+    dashscopeRegion: isDashScopeRegion(merged.dashscopeRegion)
+      ? merged.dashscopeRegion
+      : DEFAULT_SETTINGS.dashscopeRegion,
     burnSubtitles: Boolean(merged.burnSubtitles),
     lastExportDir: merged.lastExportDir || '',
     maxConcurrentScenes: Math.max(

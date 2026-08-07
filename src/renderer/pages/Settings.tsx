@@ -6,7 +6,8 @@ import type {
   UsageHistorySnapshot,
   UsageSnapshot,
 } from '../../shared/types';
-import { ELEVENLABS_TTS_MODELS, OPENAI_CHAT_MODELS, OPENAI_TTS_MODELS, OPENAI_TTS_VOICES } from '../../shared/types';
+import { ELEVENLABS_TTS_MODELS, OPENAI_CHAT_MODELS, OPENAI_TTS_MODELS, OPENAI_TTS_VOICES, QWEN_TTS_MODELS, QWEN_TTS_VOICES } from '../../shared/types';
+import { isDashScopeRegion, isQwenInstructModel, isTtsProvider } from '../../shared/voice';
 import UsageQuotaPanel from '../components/UsageQuotaPanel';
 import UsageHistoryPanel from '../components/UsageHistoryPanel';
 import ElevenLabsApiKeysPanel from '../components/ElevenLabsApiKeysPanel';
@@ -16,6 +17,7 @@ export default function Settings() {
   const [keys, setKeys] = useState<ApiKeys>({
     snapgenApiKey: '',
     openaiApiKey: '',
+    dashscopeApiKey: '',
   });
   const [settings, setSettings] = useState<AppSettings>({
     openaiModel: 'gpt-4o-mini',
@@ -24,6 +26,10 @@ export default function Settings() {
     ttsProvider: 'openai',
     elevenLabsVoiceId: '21m00Tcm4TlvDq8ikWAM',
     elevenLabsModelId: 'eleven_flash_v2_5',
+    qwenTtsModel: 'qwen3-tts-flash',
+    qwenTtsVoice: 'Cherry',
+    qwenTtsInstructions: '',
+    dashscopeRegion: 'intl',
     burnSubtitles: false,
     maxConcurrentScenes: 5,
   });
@@ -145,17 +151,22 @@ export default function Settings() {
     }
   };
 
-  const test = async (kind: 'snapgen' | 'openai' | 'elevenlabs') => {
+  const test = async (kind: 'snapgen' | 'openai' | 'elevenlabs' | 'dashscope') => {
     setBusy(true);
     setMsg(null);
     try {
-      if (kind !== 'elevenlabs') await window.studio.saveKeys(keys);
+      if (kind !== 'elevenlabs') {
+        await window.studio.saveKeys(keys);
+        if (kind === 'dashscope') await window.studio.saveSettings(settings);
+      }
       const res =
         kind === 'snapgen'
           ? await window.studio.testSnapgen()
           : kind === 'openai'
             ? await window.studio.testOpenAI()
-            : await window.studio.testElevenLabs();
+            : kind === 'dashscope'
+              ? await window.studio.testDashScope()
+              : await window.studio.testElevenLabs();
       if (kind === 'elevenlabs') {
         setElevenLabs(await window.studio.getElevenLabsSession());
         if (res.ok) await loadVoices(true);
@@ -270,7 +281,38 @@ export default function Settings() {
             onChange={(v) => setKeys({ ...keys, openaiApiKey: v })}
             placeholder="sk-..."
           />
-          <p className="hint">Vẫn cần OpenAI để viết kịch bản (ChatGPT), kể cả khi voice dùng ElevenLabs.</p>
+          <p className="hint">Vẫn cần OpenAI để viết kịch bản (ChatGPT), kể cả khi voice dùng ElevenLabs/Qwen.</p>
+        </div>
+        <div className="field">
+          <label htmlFor="dashscope">DashScope API Key (Qwen TTS)</label>
+          <SecretInput
+            id="dashscope"
+            value={keys.dashscopeApiKey}
+            onChange={(v) => setKeys({ ...keys, dashscopeApiKey: v })}
+            placeholder="sk-..."
+          />
+          <p className="hint">
+            Lấy key tại Alibaba Cloud Model Studio (Singapore intl hoặc Beijing).{' '}
+            <button type="button" className="btn ghost" disabled={busy} onClick={() => void test('dashscope')}>
+              Kiểm tra Qwen TTS
+            </button>
+          </p>
+        </div>
+        <div className="field">
+          <label htmlFor="dashscope-region">DashScope region</label>
+          <select
+            id="dashscope-region"
+            value={settings.dashscopeRegion}
+            onChange={(e) =>
+              setSettings({
+                ...settings,
+                dashscopeRegion: isDashScopeRegion(e.target.value) ? e.target.value : 'intl',
+              })
+            }
+          >
+            <option value="intl">Singapore (intl)</option>
+            <option value="cn">Beijing (cn)</option>
+          </select>
         </div>
       </section>
 
@@ -447,16 +489,20 @@ export default function Settings() {
           <select
             id="tts-provider"
             value={settings.ttsProvider}
-            onChange={(e) =>
+            onChange={(e) => {
+              const next = e.target.value;
               setSettings({
                 ...settings,
-                ttsProvider: e.target.value === 'elevenlabs' ? 'elevenlabs' : 'openai',
-              })
-            }
+                ttsProvider: isTtsProvider(next) ? next : 'openai',
+              });
+            }}
           >
             <option value="openai">OpenAI TTS</option>
             <option value="elevenlabs" disabled={!elevenLabsReady}>
               ElevenLabs {!elevenLabsReady ? '(cần API key)' : ''}
+            </option>
+            <option value="qwen" disabled={!keys.dashscopeApiKey.trim()}>
+              Qwen TTS {!keys.dashscopeApiKey.trim() ? '(cần DashScope key)' : ''}
             </option>
           </select>
         </div>
@@ -477,6 +523,53 @@ export default function Settings() {
               ))}
             </select>
           </div>
+        ) : settings.ttsProvider === 'qwen' ? (
+          <>
+            <div className="grid-2">
+              <div className="field">
+                <label htmlFor="qwen-model">Qwen TTS model</label>
+                <select
+                  id="qwen-model"
+                  value={settings.qwenTtsModel}
+                  onChange={(e) => setSettings({ ...settings, qwenTtsModel: e.target.value })}
+                >
+                  {QWEN_TTS_MODELS.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="qwen-voice">Qwen voice</label>
+                <select
+                  id="qwen-voice"
+                  value={settings.qwenTtsVoice}
+                  onChange={(e) => setSettings({ ...settings, qwenTtsVoice: e.target.value })}
+                >
+                  {QWEN_TTS_VOICES.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            {isQwenInstructModel(settings.qwenTtsModel) ? (
+              <div className="field">
+                <label htmlFor="qwen-instructions">Instructions (Instruct Flash)</label>
+                <textarea
+                  id="qwen-instructions"
+                  rows={3}
+                  value={settings.qwenTtsInstructions || ''}
+                  onChange={(e) =>
+                    setSettings({ ...settings, qwenTtsInstructions: e.target.value })
+                  }
+                  placeholder="VD: Fast speech rate, clear rising intonation…"
+                />
+              </div>
+            ) : null}
+          </>
         ) : (
           <div className="grid-2">
             <div className="field">

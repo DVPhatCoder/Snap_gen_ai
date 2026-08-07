@@ -16,9 +16,16 @@ export interface ModelOption {
   extraFields?: Record<string, string[]>;
 }
 
+export type TtsProvider = 'openai' | 'elevenlabs' | 'qwen';
+
+/** DashScope region: Singapore (intl) hoặc Beijing (cn). */
+export type DashScopeRegion = 'intl' | 'cn';
+
 export interface ApiKeys {
   snapgenApiKey: string;
   openaiApiKey: string;
+  /** DashScope / Alibaba Cloud Model Studio — Qwen3-TTS. */
+  dashscopeApiKey: string;
 }
 
 export interface AppSettings {
@@ -27,9 +34,14 @@ export interface AppSettings {
   /** Default TTS cho dự án mới (fallback khi draft cũ thiếu). */
   openaiTtsModel: string;
   openaiTtsVoice: string;
-  ttsProvider: 'openai' | 'elevenlabs';
+  ttsProvider: TtsProvider;
   elevenLabsVoiceId: string;
   elevenLabsModelId: string;
+  qwenTtsModel: string;
+  qwenTtsVoice: string;
+  /** Hướng dẫn phong cách — chỉ model Instruct Flash. */
+  qwenTtsInstructions?: string;
+  dashscopeRegion: DashScopeRegion;
   burnSubtitles: boolean;
   lastExportDir?: string;
   /** Số scene Snapgen generate song song (worker pool). Mặc định 5. */
@@ -38,7 +50,7 @@ export interface AppSettings {
 
 /** Voiceover gắn theo từng dự án (lưu trong draft.json). */
 export interface ProjectVoiceSettings {
-  ttsProvider: 'openai' | 'elevenlabs';
+  ttsProvider: TtsProvider;
   openaiTtsModel: string;
   openaiTtsVoice: string;
   elevenLabsVoiceId: string;
@@ -47,6 +59,9 @@ export interface ProjectVoiceSettings {
   elevenLabsPublicOwnerId?: string;
   elevenLabsOriginalVoiceId?: string;
   elevenLabsVoiceName?: string;
+  qwenTtsModel?: string;
+  qwenTtsVoice?: string;
+  qwenTtsInstructions?: string;
 }
 
 export interface ElevenLabsVoice {
@@ -176,7 +191,7 @@ export interface ProjectDraft {
    */
   outputFormat?: string;
   /** Voiceover theo dự án. */
-  ttsProvider: 'openai' | 'elevenlabs';
+  ttsProvider: TtsProvider;
   openaiTtsModel: string;
   openaiTtsVoice: string;
   elevenLabsVoiceId: string;
@@ -184,6 +199,9 @@ export interface ProjectDraft {
   elevenLabsPublicOwnerId?: string;
   elevenLabsOriginalVoiceId?: string;
   elevenLabsVoiceName?: string;
+  qwenTtsModel?: string;
+  qwenTtsVoice?: string;
+  qwenTtsInstructions?: string;
 }
 
 export interface SceneMediaAsset {
@@ -218,11 +236,14 @@ export interface CreateProjectInput {
   mediaKind?: MediaKind;
   stylePrompt?: string;
   openaiChatModel?: string;
-  ttsProvider?: 'openai' | 'elevenlabs';
+  ttsProvider?: TtsProvider;
   openaiTtsModel?: string;
   openaiTtsVoice?: string;
   elevenLabsVoiceId?: string;
   elevenLabsModelId?: string;
+  qwenTtsModel?: string;
+  qwenTtsVoice?: string;
+  qwenTtsInstructions?: string;
 }
 
 export interface GenerateJobInput {
@@ -247,7 +268,7 @@ export interface GenerateJobInput {
   /** Override số worker song song (mặc định lấy từ Settings). */
   maxConcurrentScenes?: number;
   /** Voiceover theo dự án (ưu tiên hơn AppSettings). */
-  ttsProvider?: 'openai' | 'elevenlabs';
+  ttsProvider?: TtsProvider;
   openaiTtsModel?: string;
   openaiTtsVoice?: string;
   elevenLabsVoiceId?: string;
@@ -255,6 +276,9 @@ export interface GenerateJobInput {
   elevenLabsPublicOwnerId?: string;
   elevenLabsOriginalVoiceId?: string;
   elevenLabsVoiceName?: string;
+  qwenTtsModel?: string;
+  qwenTtsVoice?: string;
+  qwenTtsInstructions?: string;
 }
 
 export type JobPhase =
@@ -466,4 +490,39 @@ export const ELEVENLABS_TTS_MODELS = [
   'eleven_turbo_v2_5',
   'eleven_v3',
   'eleven_multilingual_v2',
+] as const;
+
+/** Non-realtime DashScope Qwen3-TTS models. */
+export const QWEN_TTS_MODELS = [
+  'qwen3-tts-flash',
+  'qwen3-tts-instruct-flash',
+  'qwen-tts-latest',
+] as const;
+
+/** Built-in voices (non-realtime) — subset phổ biến. */
+export const QWEN_TTS_VOICES = [
+  'Cherry',
+  'Serena',
+  'Ethan',
+  'Chelsie',
+  'Vivian',
+  'Moon',
+  'Maia',
+  'Kai',
+  'Bella',
+  'Jennifer',
+  'Ryan',
+  'Katerina',
+  'Aiden',
+  'Neil',
+  'Vincent',
+  'Bunny',
+  'Arthur',
+  'Sohee',
+  'Ono Anna',
+  'Emilien',
+  'Dylan',
+  'Sunny',
+  'Rocky',
+  'Kiki',
 ] as const;

@@ -16,6 +16,7 @@ import type {
 import { getKeys, getSettings, saveKeys, saveSettings } from './store';
 import { testAccount } from './services/snapgen';
 import { generateScript, testOpenAI } from './services/openai';
+import { testDashScope } from './services/qwen-tts';
 import { remuxProject, runGenerateJob } from './services/pipeline';
 import {
   clearElevenLabsSession,
@@ -107,6 +108,10 @@ function registerIpc(): void {
   ipcMain.handle(IPC.testSnapgen, async () => testAccount(getKeys().snapgenApiKey));
   ipcMain.handle(IPC.testOpenAI, async () => testOpenAI(getKeys().openaiApiKey));
   ipcMain.handle(IPC.testElevenLabs, async () => testElevenLabsSession());
+  ipcMain.handle(IPC.testDashScope, async () => {
+    const settings = getSettings();
+    return testDashScope(getKeys().dashscopeApiKey, settings.dashscopeRegion);
+  });
   ipcMain.handle(IPC.getUsageQuotas, async () => getUsageSnapshot());
   ipcMain.handle(IPC.getUsageHistory, async () => getUsageHistory());
   ipcMain.handle(IPC.loadMoreUsageHistory, async (_e, request: LoadMoreUsageHistoryRequest) =>

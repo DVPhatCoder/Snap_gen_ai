@@ -4,7 +4,14 @@ import type {
   ElevenLabsVoice,
   ProjectVoiceSettings,
 } from '../../shared/types';
-import { ELEVENLABS_TTS_MODELS, OPENAI_TTS_MODELS, OPENAI_TTS_VOICES } from '../../shared/types';
+import {
+  ELEVENLABS_TTS_MODELS,
+  OPENAI_TTS_MODELS,
+  OPENAI_TTS_VOICES,
+  QWEN_TTS_MODELS,
+  QWEN_TTS_VOICES,
+} from '../../shared/types';
+import { isQwenInstructModel, isTtsProvider } from '../../shared/voice';
 import ElevenLabsVoicePicker from './ElevenLabsVoicePicker';
 
 export default function ProjectVoicePanel({
@@ -28,6 +35,7 @@ export default function ProjectVoicePanel({
     cookieCount: 0,
     hasApiCredential: false,
   });
+  const [hasDashScope, setHasDashScope] = useState(false);
 
   const elevenLabsReady = elevenLabs.loggedIn || elevenLabs.hasApiCredential;
 
@@ -59,6 +67,7 @@ export default function ProjectVoicePanel({
 
   useEffect(() => {
     void window.studio.getElevenLabsSession().then(setElevenLabs);
+    void window.studio.getKeys().then((k) => setHasDashScope(Boolean(k.dashscopeApiKey?.trim())));
     return window.studio.onElevenLabsSessionChange(setElevenLabs);
   }, []);
 
@@ -102,15 +111,19 @@ export default function ProjectVoicePanel({
           id="project-tts-provider"
           value={value.ttsProvider}
           disabled={disabled}
-          onChange={(e) =>
+          onChange={(e) => {
+            const next = e.target.value;
             patch({
-              ttsProvider: e.target.value === 'elevenlabs' ? 'elevenlabs' : 'openai',
-            })
-          }
+              ttsProvider: isTtsProvider(next) ? next : 'openai',
+            });
+          }}
         >
           <option value="openai">OpenAI TTS</option>
           <option value="elevenlabs" disabled={!elevenLabsReady}>
             ElevenLabs {!elevenLabsReady ? '(cần API key ở Settings)' : ''}
+          </option>
+          <option value="qwen" disabled={!hasDashScope}>
+            Qwen TTS {!hasDashScope ? '(cần DashScope key ở Settings)' : ''}
           </option>
         </select>
       </div>
@@ -204,6 +217,57 @@ export default function ProjectVoicePanel({
               ))}
             </select>
           </div>
+        </>
+      ) : value.ttsProvider === 'qwen' ? (
+        <>
+          <div className="grid-2">
+            <div className="field">
+              <label htmlFor="project-qwen-model">Qwen TTS model</label>
+              <select
+                id="project-qwen-model"
+                value={value.qwenTtsModel || 'qwen3-tts-flash'}
+                disabled={disabled}
+                onChange={(e) => patch({ qwenTtsModel: e.target.value })}
+              >
+                {QWEN_TTS_MODELS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="project-qwen-voice">Qwen voice</label>
+              <select
+                id="project-qwen-voice"
+                value={value.qwenTtsVoice || 'Cherry'}
+                disabled={disabled}
+                onChange={(e) => patch({ qwenTtsVoice: e.target.value })}
+              >
+                {QWEN_TTS_VOICES.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {isQwenInstructModel(value.qwenTtsModel) ? (
+            <div className="field">
+              <label htmlFor="project-qwen-instructions">Instructions</label>
+              <textarea
+                id="project-qwen-instructions"
+                rows={3}
+                disabled={disabled}
+                value={value.qwenTtsInstructions || ''}
+                onChange={(e) => patch({ qwenTtsInstructions: e.target.value })}
+                placeholder="VD: Calm narration, moderate pace…"
+              />
+            </div>
+          ) : null}
+          <p className="hint">
+            Qwen TTS gọi DashScope API. Nên có OpenAI key để Whisper căn mốc scene chính xác hơn.
+          </p>
         </>
       ) : (
         <div className="grid-2">

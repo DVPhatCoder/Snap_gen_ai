@@ -280,6 +280,134 @@ h2 {
   gap: 12px;
 }
 
+.narration-transcript-panel {
+  display: none;
+}
+
+.nt-panel {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.nt-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.nt-title {
+  margin: 4px 0 0;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.nt-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.nt-chip {
+  padding: 3px 8px;
+  border: 1px solid rgba(37, 224, 208, 0.22);
+  border-radius: 999px;
+  color: var(--accent);
+  background: rgba(37, 224, 208, 0.06);
+  font-size: 11px;
+  font-weight: 600;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nt-stat {
+  color: var(--muted-2);
+  font-size: 11px;
+}
+
+.nt-sub {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.nt-sub code {
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.nt-warn {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid rgba(246, 186, 87, 0.28);
+  border-radius: 7px;
+  color: var(--warning);
+  background: rgba(246, 186, 87, 0.06);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.nt-switch {
+  margin-bottom: 10px;
+}
+
+.nt-box-wrap {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0a0c10;
+  overflow: hidden;
+}
+
+.nt-box {
+  display: block;
+  width: 100%;
+  min-height: 180px;
+  max-height: 320px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 0;
+  resize: vertical;
+  color: #d7dbe2;
+  background: transparent;
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  outline: none;
+}
+
+.nt-box::placeholder {
+  color: var(--muted-2);
+}
+
+.nt-box:disabled {
+  opacity: 0.55;
+}
+
+.nt-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.nt-actions .editor-primary,
+.nt-actions .editor-secondary {
+  width: 100%;
+}
+
+.nt-error {
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
 .voice-inline-block {
   margin-top: 4px;
   padding: 12px;

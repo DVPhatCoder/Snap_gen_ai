@@ -6,6 +6,7 @@ export const IPC = {
   testSnapgen: 'test:snapgen',
   testOpenAI: 'test:openai',
   testElevenLabs: 'test:elevenlabs',
+  testDashScope: 'test:dashscope',
   getUsageQuotas: 'usage:getQuotas',
   getUsageHistory: 'usage:getHistory',
   loadMoreUsageHistory: 'usage:loadMoreHistory',

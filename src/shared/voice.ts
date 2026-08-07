@@ -1,6 +1,23 @@
-import type { AppSettings, ProjectVoiceSettings } from './types';
+import type {
+  AppSettings,
+  DashScopeRegion,
+  ProjectVoiceSettings,
+  TtsProvider,
+} from './types';
 
 export const DEFAULT_OPENAI_CHAT_MODEL = 'gpt-4o-mini';
+
+export function isTtsProvider(value: unknown): value is TtsProvider {
+  return value === 'openai' || value === 'elevenlabs' || value === 'qwen';
+}
+
+export function isDashScopeRegion(value: unknown): value is DashScopeRegion {
+  return value === 'intl' || value === 'cn';
+}
+
+export function isQwenInstructModel(model: string | null | undefined): boolean {
+  return String(model || '').toLowerCase().includes('instruct');
+}
 
 /** Model viết kịch bản theo dự án; fallback Settings → default. */
 export function resolveProjectChatModel(
@@ -17,6 +34,9 @@ export const DEFAULT_PROJECT_VOICE: ProjectVoiceSettings = {
   openaiTtsVoice: 'nova',
   elevenLabsVoiceId: '21m00Tcm4TlvDq8ikWAM',
   elevenLabsModelId: 'eleven_flash_v2_5',
+  qwenTtsModel: 'qwen3-tts-flash',
+  qwenTtsVoice: 'Cherry',
+  qwenTtsInstructions: '',
 };
 
 export function projectDraftHasVoice(
@@ -24,10 +44,10 @@ export function projectDraftHasVoice(
 ): boolean {
   if (!partial) return false;
   return (
-    partial.ttsProvider === 'openai' ||
-    partial.ttsProvider === 'elevenlabs' ||
+    isTtsProvider(partial.ttsProvider) ||
     Boolean(partial.openaiTtsVoice) ||
-    Boolean(partial.elevenLabsVoiceId)
+    Boolean(partial.elevenLabsVoiceId) ||
+    Boolean(partial.qwenTtsVoice)
   );
 }
 
@@ -40,29 +60,33 @@ export function resolveProjectVoice(
   defaults?: Partial<AppSettings> | null
 ): ProjectVoiceSettings {
   const base: ProjectVoiceSettings = {
-    ttsProvider:
-      defaults?.ttsProvider === 'elevenlabs' || defaults?.ttsProvider === 'openai'
-        ? defaults.ttsProvider
-        : DEFAULT_PROJECT_VOICE.ttsProvider,
+    ttsProvider: isTtsProvider(defaults?.ttsProvider)
+      ? defaults!.ttsProvider
+      : DEFAULT_PROJECT_VOICE.ttsProvider,
     openaiTtsModel: defaults?.openaiTtsModel || DEFAULT_PROJECT_VOICE.openaiTtsModel,
     openaiTtsVoice: defaults?.openaiTtsVoice || DEFAULT_PROJECT_VOICE.openaiTtsVoice,
     elevenLabsVoiceId: defaults?.elevenLabsVoiceId || DEFAULT_PROJECT_VOICE.elevenLabsVoiceId,
     elevenLabsModelId: defaults?.elevenLabsModelId || DEFAULT_PROJECT_VOICE.elevenLabsModelId,
+    qwenTtsModel: defaults?.qwenTtsModel || DEFAULT_PROJECT_VOICE.qwenTtsModel,
+    qwenTtsVoice: defaults?.qwenTtsVoice || DEFAULT_PROJECT_VOICE.qwenTtsVoice,
+    qwenTtsInstructions:
+      defaults?.qwenTtsInstructions ?? DEFAULT_PROJECT_VOICE.qwenTtsInstructions,
   };
   if (!projectDraftHasVoice(partial)) return base;
   return {
-    ttsProvider:
-      partial!.ttsProvider === 'elevenlabs' || partial!.ttsProvider === 'openai'
-        ? partial!.ttsProvider
-        : base.ttsProvider,
+    ttsProvider: isTtsProvider(partial!.ttsProvider) ? partial!.ttsProvider : base.ttsProvider,
     openaiTtsModel: partial!.openaiTtsModel || base.openaiTtsModel,
     openaiTtsVoice: partial!.openaiTtsVoice || base.openaiTtsVoice,
     elevenLabsVoiceId: partial!.elevenLabsVoiceId || base.elevenLabsVoiceId,
     elevenLabsModelId: partial!.elevenLabsModelId || base.elevenLabsModelId,
-    elevenLabsPublicOwnerId:
-      partial!.elevenLabsPublicOwnerId?.trim() || undefined,
-    elevenLabsOriginalVoiceId:
-      partial!.elevenLabsOriginalVoiceId?.trim() || undefined,
+    elevenLabsPublicOwnerId: partial!.elevenLabsPublicOwnerId?.trim() || undefined,
+    elevenLabsOriginalVoiceId: partial!.elevenLabsOriginalVoiceId?.trim() || undefined,
     elevenLabsVoiceName: partial!.elevenLabsVoiceName?.trim() || undefined,
+    qwenTtsModel: partial!.qwenTtsModel || base.qwenTtsModel,
+    qwenTtsVoice: partial!.qwenTtsVoice || base.qwenTtsVoice,
+    qwenTtsInstructions:
+      partial!.qwenTtsInstructions !== undefined
+        ? partial!.qwenTtsInstructions
+        : base.qwenTtsInstructions,
   };
 }

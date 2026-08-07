@@ -46,6 +46,7 @@ const api = {
   testSnapgen: (): Promise<ConnectionTestResult> => ipcRenderer.invoke(IPC.testSnapgen),
   testOpenAI: (): Promise<ConnectionTestResult> => ipcRenderer.invoke(IPC.testOpenAI),
   testElevenLabs: (): Promise<ConnectionTestResult> => ipcRenderer.invoke(IPC.testElevenLabs),
+  testDashScope: (): Promise<ConnectionTestResult> => ipcRenderer.invoke(IPC.testDashScope),
   getUsageQuotas: (): Promise<UsageSnapshot> => ipcRenderer.invoke(IPC.getUsageQuotas),
   getUsageHistory: (): Promise<UsageHistorySnapshot> => ipcRenderer.invoke(IPC.getUsageHistory),
   loadMoreUsageHistory: (
